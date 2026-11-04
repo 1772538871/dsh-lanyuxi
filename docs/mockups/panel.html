@@ -267,6 +267,12 @@ details summary:hover{color:#dbe6f6}
 .lrow b{font-size:12.5px;font-weight:600;color:#cfdcee;flex:0 0 auto}
 .lrow input{flex:1}
 .cred,.deps{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);flex-wrap:wrap}
+.napcat{display:flex;align-items:center;gap:10px;margin-top:10px;padding:9px 12px;border:1px dashed var(--line);border-radius:10px;background:#0f151e;font-size:12px;color:var(--muted);flex-wrap:wrap}
+.napcat .nlabel{font-weight:600;color:#cfdcee;font-size:12.5px}
+.napcat .mono2{font-family:Consolas,monospace;font-size:11.5px;color:#9fb2cc;background:#0b1017;border:1px solid var(--line);border-radius:6px;padding:2px 8px}
+.napcat .nhint{flex:1;min-width:200px;color:#7f8ea3;font-size:11.5px}
+.napcat .btn{margin-left:auto}
+.lmini{font-size:11.5px;color:#7f8ea3;flex:1}
 .cred .mono2{font-family:Consolas,monospace;font-size:11.5px;color:#9fb2cc;background:#0f151e;border:1px solid var(--line);border-radius:6px;padding:2px 8px}
 .cred .clink{color:#9fc0ff;cursor:pointer}
 .cred .clink:hover{text-decoration:underline}
@@ -482,7 +488,7 @@ details .inner{padding-top:10px;display:flex;flex-direction:column;gap:9px}
           <div class="plat">
             <div class="pav"><span class="pbadge"><svg width="12" height="12" fill="#12B7F5" role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><title>Tencent QQ</title><path d="M21.395 15.035a40 40 0 0 0-.803-2.264l-1.079-2.695c.001-.032.014-.562.014-.836C19.526 4.632 17.351 0 12 0S4.474 4.632 4.474 9.241c0 .274.013.804.014.836l-1.08 2.695a39 39 0 0 0-.802 2.264c-1.021 3.283-.69 4.643-.438 4.673.54.065 2.103-2.472 2.103-2.472 0 1.469.756 3.387 2.394 4.771-.612.188-1.363.479-1.845.835-.434.32-.379.646-.301.778.343.578 5.883.369 7.482.189 1.6.18 7.14.389 7.483-.189.078-.132.132-.458-.301-.778-.483-.356-1.233-.646-1.846-.836 1.637-1.384 2.393-3.302 2.393-4.771 0 0 1.563 2.537 2.103 2.472.251-.03.581-1.39-.438-4.673"/></svg></span></div>
             <div class="meta">
-              <div class="nm">大肥鱼二号 <span class="acc" onclick="toast('已复制账号：3218807245')">3218807245</span></div>
+              <div class="nm">大肥鱼二号 <span class="acc" onclick="toast('已复制账号：2484026025')">2484026025</span></div>
               <div class="sub">3 个白名单群 · 今日发言 7 条 · 手机在线</div>
             </div>
             <span class="pill warn" id="st-qq">待测试</span>
@@ -493,12 +499,19 @@ details .inner{padding-top:10px;display:flex;flex-direction:column;gap:9px}
             <button class="btn" id="vt-qq" onclick="runTest('qq')">测试收发</button>
           </div>
 
+          <div class="napcat" id="napcat-qq">
+            <span class="nlabel">NapCat 面板</span>
+            <span class="mono2">http://127.0.0.1:6100</span>
+            <span class="nhint">只有本机能打开；登录失败、换号、看实时日志都在这里</span>
+            <button class="btn ghost" onclick="openNapcat()">打开</button>
+          </div>
+
           <details>
-            <summary>登录方式与凭据（一般不用动）</summary>
+            <summary>登录与凭据（扫一次就够，其余自动）</summary>
             <div class="inner">
-              <div class="lrow"><b>① 扫码登录（推荐）</b><button class="btn ghost" onclick="openScan('qq')">扫码</button></div>
+              <div class="lrow"><b>① 扫码登录（推荐）</b><span class="lmini">扫一次，QQ 号 / WS 端口 / token 自动写回，不用再扫别的</span><button class="btn ghost" onclick="openScan('qq')">一键扫码</button></div>
               <div class="lrow"><b>② 手动粘贴 Cookie / 密钥</b><input type="text" placeholder="粘贴 accessToken"><button class="btn ghost" onclick="toast('已保存，并重新做一次收发测试')">保存</button></div>
-              <div class="cred"><span>凭据</span><span class="mono2">accessToken ·••••7f3a（已设置）</span><span class="clink" onclick="toast('凭据存在 DSH 凭据库，界面只显示尾号')">查看</span><span class="clink warn" onclick="toast('已清空凭据，状态牌回到「未绑定」')">清空</span></div>
+              <div class="cred"><span>凭据</span><span class="mono2">QQ 2484026025 ｜ WS 127.0.0.1:3001 ｜ token ·••••91d2（扫码后自动写入）</span><span class="clink" onclick="toast('凭据存在 DSH 凭据库，界面只显示尾号')">查看</span><span class="clink warn" onclick="toast('已清空凭据，状态牌回到「未绑定」')">清空</span></div>
               <div class="deps"><span>依赖体检</span><span class="tag green">ffmpeg ✓</span><span class="tag green">抽帧 ✓</span><span class="tag green">签名接口 ✓</span></div>
             </div>
           </details>
@@ -875,8 +888,8 @@ function drawQR(){
 }
 
 var META = {
-  qq: { title: '绑定 QQ 小号', sub: '用手机 QQ 扫一下，登录的是你自己的小号',
-        steps: ['手机上打开 <b>QQ</b>', '点右上角「＋」→ <b>扫一扫</b>', '确认登录到电脑（就是你那个小号）'] },
+  qq: { title: '绑定 QQ 小号', sub: '扫这一次就够：登进去以后，账号、WS 端口、token 全部自动写回',
+        steps: ['手机上打开 <b>QQ</b>', '点右上角「＋」→ <b>扫一扫</b>', '确认登录 —— 之后凭据自动保存，不用再扫别的'] },
   bili: { title: '绑定 B 站小号', sub: '用哔哩哔哩手机客户端扫一扫',
         steps: ['手机上打开 <b>哔哩哔哩</b>', '我的 → 右上角 <b>扫一扫</b>', '确认登录'] },
   wechat: { title: '绑定微信小号', sub: '扫码只用于登录，不会读取你的聊天记录',
@@ -908,11 +921,20 @@ function closeScan(){
   document.getElementById('mask').classList.remove('on');
 }
 
+function openNapcat(){
+  toast('正在打开 NapCat 面板：http://127.0.0.1:6100（仅本机可访问）');
+}
+
 function fakeDone(){
   var e = document.getElementById('m-state');
-  e.textContent = '绑定成功 · 已连接';
+  e.textContent = '登录成功 · 凭据已自动写入';
   e.className = 'mstate ok';
-  setTimeout(function(){ closeScan(); toast('绑定成功（演示）'); }, 900);
+  setTimeout(function(){
+    closeScan();
+    toast(current === 'qq'
+      ? '已拿到 QQ 2484026025 ｜ WS 127.0.0.1:3001 ｜ token ·••••91d2，不用再扫别的'
+      : '绑定成功（演示）');
+  }, 1100);
 }
 
 function tryVoice(btn){
