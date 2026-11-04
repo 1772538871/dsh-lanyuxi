@@ -8,14 +8,14 @@
   "exports": {
     ".": "./index.js",
     "./locale/*.json": "./locale/*.json",
-    "./icon": "./icon.svg",
+    "./icon": "./icon.webp",
     "./cordis.patch.yml": "./cordis.patch.yml"
   },
   "files": [
     "index.js",
     "cordis.patch.yml",
     "locale/*.json",
-    "icon.svg"
+    "icon.webp"
   ],
   "dsh": {
     "bundle": {
