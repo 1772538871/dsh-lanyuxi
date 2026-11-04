@@ -8,7 +8,7 @@
 import { readFileSync, existsSync, mkdirSync, writeFileSync, statSync } from "node:fs"
 import { join } from "node:path"
 import { randomUUID } from "node:crypto"
-import { spawn } from "node:child_process"
+import { spawn, spawnSync } from "node:child_process"
 
 export const name = "lanyuxi"
 export const inject = ["tools"]
@@ -351,10 +351,21 @@ export function apply(ctx, rawConfig) {
   function stopNapcat() {
     try {
       const pattern = config.napcatDir.replace(/'/g, "''")
-      const script = "Get-Process | Where-Object { $_.Path -like '" + pattern + "*' -or $_.ProcessName -eq 'NapCatWinBootMain' } | Stop-Process -Force -ErrorAction SilentlyContinue"
-      spawn("powershell", ["-NoProfile", "-Command", script], { detached: true, stdio: "ignore", windowsHide: true }).unref()
-      logger.info?.("[lanyuxi] 已请求关闭 NapCat")
-      return { ok: true }
+      const endpoint = readNapcatEndpoint(config.napcatDir)
+      const port = endpoint ? endpoint.port : 3001
+      const script = [
+        "$pids = @()",
+        "try { $pids += (Get-NetTCPConnection -LocalPort " + port + " -State Listen -ErrorAction SilentlyContinue).OwningProcess } catch {}",
+        "try { $pids += (Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like '*" + pattern + "*' }).ProcessId } catch {}",
+        "try { $pids += (Get-CimInstance Win32_Process -Filter \"Name='NapCatWinBootMain.exe'\" -ErrorAction SilentlyContinue).ProcessId } catch {}",
+        "$pids = $pids | Where-Object { $_ } | Sort-Object -Unique",
+        "foreach ($p in $pids) { try { Stop-Process -Id $p -Force -ErrorAction Stop } catch {} }",
+        "Write-Output ($pids -join ',')",
+      ].join("; ")
+      const result = spawnSync("powershell", ["-NoProfile", "-Command", script], { encoding: "utf8", timeout: 20000, windowsHide: true })
+      const killed = String(result.stdout ?? "").trim()
+      logger.info?.("[lanyuxi] 关闭 NapCat，命中 PID: " + (killed || "无"))
+      return { ok: true, killed: killed || "" }
     } catch (error) {
       logger.warn?.("[lanyuxi] 关闭 NapCat 失败: " + String(error))
       return { ok: false, error: String(error) }

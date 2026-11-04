@@ -63,7 +63,7 @@ window.__ModuleLoader__.load({
         el = document.createElement('div');
         el.id = 'lyx-toast';
         el.className = 'toast';
-        document.body.appendChild(el);
+        (document.querySelector('.lyx-scope') || document.body).appendChild(el);
       }
       return el;
     }
