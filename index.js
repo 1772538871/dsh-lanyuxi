@@ -5,9 +5,10 @@
  * 配置里读，不再让主人填一遍。她在 DSH 里只有一个会话，所有聊天都汇进这一个大脑。
  */
 
-import { readFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs"
+import { readFileSync, existsSync, mkdirSync, writeFileSync, statSync } from "node:fs"
 import { join } from "node:path"
 import { randomUUID } from "node:crypto"
+import { spawn } from "node:child_process"
 
 export const name = "lanyuxi"
 export const inject = ["tools"]
@@ -314,8 +315,76 @@ export function apply(ctx, rawConfig) {
         lastChat: lastChat?.chatKey ?? null,
         allowGroups: config.allowGroups,
         napcatPanel: config.napcatPanel,
+        webRoutes: routeRegistered,
+        qrFileSeen: existsSync(join(config.napcatDir, "napcat", "cache", "qrcode.png")),
       }, null, 2)
     },
+  })
+
+  // —— 面板用的三个 HTTP 接口：起 NapCat / 取二维码 / 查状态 ——
+  const qrPath = join(config.napcatDir, "napcat", "cache", "qrcode.png")
+  let napcatStarting = false
+
+  function startNapcat() {
+    if (napcatStarting) return { ok: true, already: true }
+    const bat = join(config.napcatDir, "napcat.bat")
+    if (!existsSync(bat)) return { ok: false, error: "找不到 " + bat }
+    napcatStarting = true
+    try {
+      const child = spawn("cmd.exe", ["/c", bat], {
+        cwd: config.napcatDir,
+        detached: true,
+        stdio: "ignore",
+        windowsHide: false,
+      })
+      child.unref()
+      logger.info?.("[lanyuxi] 已启动 NapCat: " + bat)
+      return { ok: true, pid: child.pid }
+    } catch (error) {
+      logger.warn?.("[lanyuxi] 启动 NapCat 失败: " + String(error))
+      return { ok: false, error: String(error) }
+    } finally {
+      setTimeout(() => { napcatStarting = false }, 15000)
+    }
+  }
+
+  let routeRegistered = false
+  ctx.inject(["webServer"], (sctx) => {
+    sctx.effect(() => {
+      const dispose = sctx.webServer.register({
+        kind: "prefix",
+        path: "/lanyuxi",
+        handler: async (req, res) => {
+        const url = new URL(req.url ?? "/", "http://127.0.0.1")
+        const send = (status, body, type) => {
+          res.statusCode = status
+          res.setHeader("content-type", type ?? "application/json; charset=utf-8")
+          res.setHeader("cache-control", "no-store")
+          res.end(typeof body === "string" || Buffer.isBuffer(body) ? body : JSON.stringify(body))
+        }
+        if (url.pathname === "/lanyuxi/status") {
+          return send(200, { connected, selfId, allowGroups: config.allowGroups, panel: config.napcatPanel })
+        }
+        if (url.pathname === "/lanyuxi/start") {
+          const result = startNapcat()
+          return send(result.ok ? 200 : 500, result)
+        }
+        if (url.pathname === "/lanyuxi/qr") {
+          try {
+            if (!existsSync(qrPath)) return send(404, { error: "还没有二维码（NapCat 可能没在跑）" })
+            const buf = readFileSync(qrPath)
+            res.setHeader("x-qr-mtime", String(statSync(qrPath).mtimeMs))
+            return send(200, buf, "image/png")
+          } catch (error) {
+            return send(500, { error: String(error) })
+          }
+        }
+        return send(404, { error: "unknown" })
+        },
+      })
+      routeRegistered = true
+      return dispose
+    }, "lanyuxi: 面板接口")
   })
 
   ctx.effect(() => {
