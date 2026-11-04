@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>蓝余汐 · 一页速览（可打印）</title>
+<style>
+@page{size:A4 landscape;margin:9mm}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#fff;color:#1c2229;font:11.5px/1.62 "Microsoft YaHei UI","Microsoft YaHei",system-ui,sans-serif;padding:12px;-webkit-font-smoothing:antialiased}
+.sheet{max-width:1080px;margin:0 auto;background:#fcfdff;border:1px solid #e9edf3;border-radius:14px;padding:16px 18px 14px}
+header{display:flex;align-items:flex-end;justify-content:space-between;border-bottom:2px solid #1c2229;padding-bottom:9px;margin-bottom:13px}
+h1{font-size:21px;letter-spacing:.3px;line-height:1.25}
+h1 small{font-size:11px;color:#5b6472;font-weight:400;margin-left:9px;letter-spacing:.2px}
+.meta{font-size:10.5px;color:#5b6472;text-align:right;line-height:1.65;white-space:nowrap}
+.cols{display:grid;grid-template-columns:252px 1fr;gap:14px}
+.box{background:#fff;border:1px solid #e4e9f1;border-radius:10px;padding:10px 11px;margin-bottom:10px}
+.box h2{font-size:11px;letter-spacing:.6px;color:#3f4855;margin-bottom:7px;display:flex;align-items:center;gap:6px}
+.box h2:before{content:"";width:3px;height:11px;border-radius:2px;background:#2b5fd9}
+.box p{font-size:11px;color:#37414e;line-height:1.7}
+.rules{list-style:none;font-size:11px;color:#37414e}
+.rules li{padding:3.5px 0 3.5px 17px;position:relative}
+.rules li:before{content:"✓";position:absolute;left:0;top:2px;color:#1f8a52;font-weight:700;font-size:11px}
+.legend{display:flex;flex-wrap:wrap;gap:7px;font-size:10.5px;color:#37414e}
+.legend span{display:inline-flex;align-items:center;gap:5px;border:1px solid #e4e9f1;background:#f8fafd;border-radius:99px;padding:3px 9px}
+.dot{width:7px;height:7px;border-radius:50%;display:inline-block}
+.d-ok{background:#2f9e5f}.d-warn{background:#c9901a}.d-off{background:#a8b1bd}.d-bad{background:#d0403a}
+.pages{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.pg{background:#fff;border:1px solid #e4e9f1;border-radius:10px;padding:9px 10px;display:flex;flex-direction:column;gap:7px}
+.pg b{font-size:11.5px;color:#1c2229}
+.pg i{font-style:normal;font-size:10.5px;color:#5b6472;line-height:1.55}
+.wf{display:flex;flex-direction:column;gap:4px;height:62px}
+.wf.row{flex-direction:row;gap:4px}
+.wf .b{background:#eef2f8;border:1px solid #e0e6ef;border-radius:4px;flex:1}
+.wf .b.t{flex:0 0 10px;background:#e5ebf4}
+.wf .b.pill{flex:0 0 24px;height:10px;border-radius:99px;background:#e8f5ed;border-color:#cfe9da}
+.mid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.steps{display:flex;gap:8px;margin-top:10px}
+.step{flex:1;background:#fff;border:1px solid #e4e9f1;border-radius:10px;padding:8px 9px;font-size:10.5px;color:#4a5462;line-height:1.55}
+.step b{display:block;font-size:11px;color:#1c2229;margin-bottom:3px}
+.tree{font-family:Consolas,ui-monospace,monospace;font-size:9.5px;color:#3f4855;line-height:1.7;white-space:pre}
+footer{margin-top:11px;border-top:1px solid #e4e9f1;padding-top:8px;font-size:9.5px;color:#6b7482;display:flex;justify-content:space-between;gap:16px}
+.btnbar{max-width:1080px;margin:0 auto 9px;display:flex;align-items:center;justify-content:space-between;font-size:10.5px;color:#5b6472}
+.btnbar button{border:1px solid #d7dee8;background:#fff;color:#1c2229;border-radius:7px;padding:5px 13px;font-size:11px;cursor:pointer}
+.btnbar button:hover{background:#f2f6fc;border-color:#c3cddc}
+@media print{.btnbar{display:none}body{padding:0;background:#fff}.sheet{max-width:none;border:0;border-radius:0;background:#fff;padding:0}}
+</style>
+</head>
+<body>
+<div class="btnbar"><span>打印：目标「另存为 PDF」· 布局「横向」· 边距「默认」· 关掉页眉页脚 → 正好一页</span><button onclick="window.print()">打印 / 另存为 PDF</button></div>
+<div class="sheet">
+  <header>
+    <h1>蓝余汐 · 一页速览<small>dsh-lanyuxi ｜ AI 网友 + 小恶魔系傲娇女仆 · DSH 插件</small></h1>
+    <div class="meta">版本 v1.0 ｜ 七页界面 + 七个里程碑<br>视觉原型：docs\mockups\panel.html（深色，屏幕用）</div>
+  </header>
+
+  <div class="cols">
+    <div>
+      <div class="box">
+        <h2>她是谁</h2>
+        <p>有自己的号（QQ / B站 / 微信）、自己的日子（刷 B 站、泡群、写日记）、自己的随身物品（表情包、图片、声音）。主动只找主人，对陌生人礼貌但绝不主动搭话；嘴上傲娇，行动上一直在意。</p>
+      </div>
+      <div class="box">
+        <h2>底线三条（代码强制）</h2>
+        <ul class="rules">
+          <li>主人私事对外零泄露</li>
+          <li>对陌生人礼貌、不吵架、不主动搭话</li>
+          <li>主动消息每天 ≤ 3 条，对外发言有总量</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h2>状态牌（只看这一块）</h2>
+        <div class="legend">
+          <span><i class="dot d-ok"></i>已登录·已验证</span>
+          <span><i class="dot d-warn"></i>待测试</span>
+          <span><i class="dot d-off"></i>未绑定</span>
+          <span><i class="dot d-bad"></i>掉线</span>
+        </div>
+        <p style="margin-top:7px;font-size:10.5px;color:#5b6472">绿 = 凭据齐全 <b>且</b> 收发测试通过；只有绿才算能用。</p>
+      </div>
+      <div class="box" style="margin-bottom:0">
+        <h2>目录（不写 C 盘）</h2>
+        <div class="tree">E:\dsh-foundry\
+ ├─ dsh-lanyuxi\      代码（git）
+ └─ lanyuxi-home\     她的家（不进 git）
+     日记\表\  日记\里\
+     表情包\开心\ 无语\ 撒娇\ 凶\
+     图片\  声音\  models\</div>
+      </div>
+    </div>
+
+    <div>
+      <div class="pages">
+        <div class="pg"><b>① 总览驾驶舱</b>
+          <div class="wf"><div class="b t"></div><div class="b"></div><div class="wf row" style="height:17px"><div class="b"></div><div class="b"></div><div class="b"></div></div><div class="wf row" style="height:15px"><div class="b"></div><div class="b"></div></div></div>
+          <i>她现在怎样 · 三平台 · token · 视频 · 学到的东西 · 时间线 · 家</i></div>
+        <div class="pg"><b>② 平台接入</b>
+          <div class="wf"><div class="wf row" style="height:17px"><div class="b"></div><div class="b pill"></div></div><div class="b"></div><div class="wf row" style="height:17px"><div class="b"></div><div class="b pill"></div></div><div class="b"></div></div>
+          <i>状态牌 → 测试收发 → 折叠的登录方式与凭据 → 依赖体检</i></div>
+        <div class="pg"><b>③ 人格与说话</b>
+          <div class="wf row"><div class="b"></div><div class="b"></div></div>
+          <i>人格卡 · 纠正记录 · 怎么叫你 · 禁说清单 · 傲娇浓度</i></div>
+        <div class="pg"><b>④ 素材与日记</b>
+          <div class="wf"><div class="wf row" style="height:21px"><div class="b"></div><div class="b"></div></div><div class="wf row" style="height:21px"><div class="b"></div><div class="b"></div></div></div>
+          <i>表情包按情绪 · 图片可外发/禁外发 · 表里两本日记</i></div>
+        <div class="pg"><b>⑤ 语音引擎</b>
+          <div class="wf row"><div class="b"></div><div class="b"></div></div>
+          <i>模型状态 · 试听 · 两档情绪 · 短句缓存 · 超长句改文字</i></div>
+        <div class="pg"><b>⑥ 权限与刹车</b>
+          <div class="wf"><div class="b t"></div><div class="b t"></div><div class="b t"></div><div class="wf row" style="height:15px"><div class="b"></div><div class="b"></div></div></div>
+          <i>三级权限 · 静音/暂停社交/停 B 站 · 今天拦下几次</i></div>
+        <div class="pg"><b>⑦ 桌宠</b>
+          <div class="wf"><div class="wf row" style="height:23px"><div class="b"></div><div class="b"></div></div><div class="wf row" style="height:15px"><div class="b"></div><div class="b"></div></div></div>
+          <i>L2D + 口型跟语音 · 五套动作 · 全屏让位 · 气泡不含隐私</i></div>
+        <div class="pg" style="background:#f6f9fe;border-color:#dfe8f6"><b>贯穿全站的规矩</b>
+          <i>状态只有一份数据（总览与设置同步）<br>没数据就说没数据，不显示 0<br>凡是能点的，悬停一定变、按下一定有位移<br>里日记在发送通道里根本打不开</i></div>
+      </div>
+
+      <div class="steps">
+        <div class="step"><b>M1 QQ 打通</b>双向文字 · 群里能说话 · 白名单 · 发言上限 · 收发测试通过才算绿</div>
+        <div class="step"><b>M2 面板+人格+守门员</b>七页可见 · 人格卡生效 · 守门员拦三类事</div>
+        <div class="step"><b>M3 素材与日记</b>两本日记 · 表情包逐图理解 · 只改那一张</div>
+        <div class="step"><b>M4 语音</b>内嵌 SoVITS · 短句缓存 · 两档情绪</div>
+      </div>
+      <div class="steps" style="margin-top:8px">
+        <div class="step"><b>M5 B 站</b>看/评论/被 @ 礼貌回 · 评论区 @ 主人 · 412 可读错误不连试</div>
+        <div class="step"><b>M6 微信</b>注入桥进白名单群（风险最高，最后做；号是消耗品）</div>
+        <div class="step"><b>M7 桌宠</b>借 dsh-pet 外壳 → 自研口型桥 → 换她的模型（依赖 M4）</div>
+        <div class="step" style="background:#f6f9fe;border-color:#dfe8f6"><b>第一步看这里</b>工作区 → 未分组 → 蓝余汐；给她二级权限；点「测试收发」</div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <span>三个参考：Alterssss/dsh-bili-whale（扫码登录 + 手动 Cookie 兜底 + 依赖体检）· Yuuyuko-uu/dsh-fish-buddy（滑窗字幕进上下文）· @linxin666/dsh-pet（Apache-2.0 桌宠外壳）</span>
+    <span>定稿：蓝余汐-项目定稿.txt（17 节 221 行）</span>
+  </footer>
+</div>
+</body>
+</html>
