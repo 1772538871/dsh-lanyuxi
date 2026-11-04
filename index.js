@@ -334,10 +334,13 @@ export function apply(ctx, rawConfig) {
       const nodeExe = join(config.napcatDir, "node.exe")
       const entry = join(config.napcatDir, "index.js")
       const hidden = existsSync(nodeExe) && existsSync(entry)
-      const child = hidden
-        ? spawn(nodeExe, [entry], { cwd: config.napcatDir, detached: true, stdio: "ignore", windowsHide: true, env: process.env })
-        : spawn("cmd.exe", ["/c", bat], { cwd: config.napcatDir, detached: true, stdio: "ignore", windowsHide: true })
-      child.unref()
+      // detached:true 会在 Windows 上新建控制台窗口；用 Start-Process -WindowStyle Hidden 才能真正无窗口
+      const psQuote = (s) => "'" + String(s).replace(/'/g, "''") + "'"
+      const script = hidden
+        ? "Start-Process -FilePath " + psQuote(nodeExe) + " -ArgumentList " + psQuote(entry) + " -WorkingDirectory " + psQuote(config.napcatDir) + " -WindowStyle Hidden"
+        : "Start-Process -FilePath " + psQuote(bat) + " -WorkingDirectory " + psQuote(config.napcatDir) + " -WindowStyle Hidden"
+      spawnSync("powershell", ["-NoProfile", "-Command", script], { encoding: "utf8", timeout: 20000, windowsHide: true })
+      const child = { pid: undefined }
       logger.info?.("[lanyuxi] 已启动 NapCat: " + bat)
       return { ok: true, pid: child.pid }
     } catch (error) {

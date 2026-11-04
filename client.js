@@ -25,6 +25,7 @@ window.__ModuleLoader__.load({
 .lyx-scope .card .card{background:rgba(255,255,255,.03) !important}
 .lyx-scope .btn[style*="width:100%"]{width:auto !important;display:block;margin:8px 0 0 auto !important;padding:5px 12px;font-size:12px;border-radius:8px}
 .lyx-scope .btn[onclick*="openScan"]{background:linear-gradient(140deg,#3f6fe0,#5b8cff) !important;border-color:transparent !important;color:#fff !important;font-weight:600}
+.lyx-scope .btn:disabled{opacity:.55;cursor:progress}
 .lyx-scope .btn[data-bound="1"]{background:linear-gradient(140deg,#e5484d,#c62b30) !important}
 .lyx-scope .mexp{margin:12px 0 2px;font-size:12px;color:#9fb2cc}
 .lyx-scope .mexp .top{display:flex;justify-content:space-between;margin-bottom:6px;font-weight:600}
@@ -106,14 +107,27 @@ window.__ModuleLoader__.load({
         window.openScan = function (which) {
           if (which && which !== 'qq') { lyxToast('这个平台还没接（M5 / M6）'); return; }
           if (boundRef && boundRef.current) {
-
+            const buttons = document.querySelectorAll('.lyx-scope button[data-bound="1"]');
+            for (let i = 0; i < buttons.length; i++) { buttons[i].disabled = true; buttons[i].textContent = '正在退出…'; }
             fetch('/lanyuxi/stop', { method: 'POST' }).then(function (r) {
               if (!r.ok) throw new Error('http ' + r.status);
-              lyxToast('已退出绑定，正在关闭 NapCat');
             }).catch(function () {
-              lyxToast('退出绑定失败：面板接口不可用（重启 DSH 后再试）');
+              lyxToast('退出绑定失败：面板接口不可用');
             }).then(function () {
-              setTimeout(function () { window.dispatchEvent(new CustomEvent('lyx-refresh')); }, 2500);
+              let tries = 0;
+              const timer = setInterval(function () {
+                tries += 1;
+                fetch('/lanyuxi/status', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (s) {
+                  const still = Boolean(s && s.connected);
+                  if (!still || tries >= 20) {
+                    clearInterval(timer);
+                    boundRef.current = still;
+                    for (let i = 0; i < buttons.length; i++) buttons[i].disabled = false;
+                    window.dispatchEvent(new CustomEvent('lyx-refresh'));
+                    lyxToast(still ? 'NapCat 还没关掉，请再试一次或手动关闭' : '已退出绑定');
+                  }
+                }).catch(function () {});
+              }, 1000);
             });
             return;
           }
