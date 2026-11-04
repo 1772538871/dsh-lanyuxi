@@ -33,16 +33,14 @@ window.__ModuleLoader__.load({
 .lyx-scope .mono2,.lyx-scope .row,.lyx-scope .lrow{min-width:0;word-break:break-all}
 .lyx-scope .plat{flex-wrap:wrap}
 .lyx-scope .navbtn{font-size:13px;padding:7px 11px}
-.lyx-scope.lyx-layout{display:grid;grid-template-columns:150px minmax(0,1fr);gap:14px;align-items:start}
-.lyx-scope .lyx-rail{background:rgba(255,255,255,.03);border:1px solid rgba(91,140,255,.18);border-radius:14px;padding:8px;position:sticky;top:0}
-.lyx-scope .lyx-rail #nav{display:flex;flex-direction:column;gap:3px}
-.lyx-scope .lyx-rail .navbtn{width:100%;text-align:left;padding:8px 10px;font-size:12.5px;display:flex;align-items:center;gap:8px}
+.lyx-scope.lyx-layout{display:block}
+.lyx-scope .lyx-rail{display:flex;flex-wrap:wrap;gap:4px;align-items:center;background:linear-gradient(135deg,rgba(91,140,255,.18),rgba(160,107,255,.11) 62%,rgba(91,140,255,.05));border:1px solid rgba(91,140,255,.26);border-radius:14px;padding:8px 10px;margin-bottom:14px}
+.lyx-scope .lyx-rail #nav{display:flex;flex-direction:row;flex-wrap:wrap;gap:4px}
+.lyx-scope .lyx-rail .navbtn{width:auto;text-align:left;padding:6px 10px;font-size:12.5px;display:flex;align-items:center;gap:6px}
 .lyx-scope .lyx-rail .ic{display:inline-flex;width:16px;height:16px;flex:0 0 auto}
 .lyx-scope .lyx-rail .ic svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 .lyx-scope .lyx-main{min-width:0}
-.lyx-scope .lyx-rail{width:132px}
-.lyx-scope.lyx-layout{grid-template-columns:132px minmax(0,1fr);gap:12px}
-.lyx-scope .lyx-rail .navbtn{font-size:12px;padding:7px 8px;gap:6px}
+.lyx-scope .lyx-rail .navbtn.on{border-color:rgba(91,140,255,.45)}
 .lyx-scope .lyx-main .card{padding:13px 14px}
 .lyx-scope .lyx-main .sub,.lyx-scope .lyx-main .meta{min-width:0;white-space:normal;word-break:break-word}
 .lyx-scope .lyx-main .napcat .nhint{display:none}
