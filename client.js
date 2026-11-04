@@ -134,6 +134,7 @@ window.__ModuleLoader__.load({
             if (stopped || !s) return;
             if (s.connected) {
               clearInterval(timer); timer = null;
+              window.dispatchEvent(new CustomEvent('lyx-refresh'));
               setScan({ open: true, done: true, qr: null, status: '登录成功 · 已连接 ' + (s.selfId || '') });
             }
           }).catch(function () {
@@ -157,6 +158,7 @@ window.__ModuleLoader__.load({
           }).catch(function () {});
         }
         function onScan() {
+          if (boundRef && boundRef.current) { setScan({ open: true, done: true, qr: null, status: '已经登录了 · ' + '' }); window.dispatchEvent(new CustomEvent('lyx-refresh')); return; }
           setScan({ open: true, done: false, qr: null, expiresAt: Date.now() + 300000, status: '正在启动 NapCat…' });
           fetch('/lanyuxi/start', { method: 'POST' }).then(function (r) {
             if (!r.ok) throw new Error('http ' + r.status);
@@ -203,8 +205,9 @@ window.__ModuleLoader__.load({
         }).catch(function () {});
         }
         sync();
+        const poll = setInterval(sync, 5000);
         window.addEventListener('lyx-refresh', sync);
-        return function () { dead = true; window.removeEventListener('lyx-refresh', sync); };
+        return function () { dead = true; clearInterval(poll); window.removeEventListener('lyx-refresh', sync); };
       }, [tab]);
 
       const bar = h('div', { style: { display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 14 } },

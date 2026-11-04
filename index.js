@@ -331,12 +331,12 @@ export function apply(ctx, rawConfig) {
     if (!existsSync(bat)) return { ok: false, error: "找不到 " + bat }
     napcatStarting = true
     try {
-      const child = spawn("cmd.exe", ["/c", bat], {
-        cwd: config.napcatDir,
-        detached: true,
-        stdio: "ignore",
-        windowsHide: false,
-      })
+      const nodeExe = join(config.napcatDir, "node.exe")
+      const entry = join(config.napcatDir, "index.js")
+      const hidden = existsSync(nodeExe) && existsSync(entry)
+      const child = hidden
+        ? spawn(nodeExe, [entry], { cwd: config.napcatDir, detached: true, stdio: "ignore", windowsHide: true, env: process.env })
+        : spawn("cmd.exe", ["/c", bat], { cwd: config.napcatDir, detached: true, stdio: "ignore", windowsHide: true })
       child.unref()
       logger.info?.("[lanyuxi] 已启动 NapCat: " + bat)
       return { ok: true, pid: child.pid }
