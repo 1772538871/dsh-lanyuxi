@@ -21,7 +21,12 @@ window.__ModuleLoader__.load({
 .lyx-scope .verify,.lyx-scope .napcat,.lyx-scope .mono,.lyx-scope .mono2,.lyx-scope .acc{background:rgba(255,255,255,.06) !important;border-color:rgba(91,140,255,.18) !important}
 .lyx-scope .card .card{background:rgba(255,255,255,.03) !important}
 .lyx-scope .btn[style*="width:100%"]{width:auto !important;display:block;margin:8px 0 0 auto !important;padding:5px 12px;font-size:12px;border-radius:8px}
-.lyx-scope .btn[onclick*="openScan('qq')"]{background:linear-gradient(140deg,#e5484d,#c62b30) !important;border-color:transparent !important;color:#fff !important;font-weight:600}
+.lyx-scope .btn[onclick*="openScan"]{background:linear-gradient(140deg,#3f6fe0,#5b8cff) !important;border-color:transparent !important;color:#fff !important;font-weight:600}
+.lyx-scope .btn[data-bound="1"]{background:linear-gradient(140deg,#e5484d,#c62b30) !important}
+.lyx-scope .mexp{margin:12px 0 2px;font-size:12px;color:#9fb2cc}
+.lyx-scope .mexp .top{display:flex;justify-content:space-between;margin-bottom:6px;font-weight:600}
+.lyx-scope .mexp .bar{height:6px;border-radius:99px;background:rgba(255,255,255,.12);overflow:hidden}
+.lyx-scope .mexp .bar i{display:block;height:100%;background:linear-gradient(90deg,#3f6fe0,#5b8cff);transition:width .3s linear}
 .lyx-scope .mono2,.lyx-scope .row,.lyx-scope .lrow{min-width:0;word-break:break-all}
 .lyx-scope .plat{flex-wrap:wrap}
 .lyx-scope .navbtn{font-size:13px;padding:7px 11px}
@@ -59,6 +64,12 @@ window.__ModuleLoader__.load({
     function LanyuxiSettings() {
       const [tab, setTab] = React.useState('platforms');
       const [scan, setScan] = React.useState(null);
+      const [tick, setTick] = React.useState(Date.now());
+      React.useEffect(function () {
+        if (!scan || scan.done) return;
+        const timer = setInterval(function () { setTick(Date.now()); }, 1000);
+        return function () { clearInterval(timer); };
+      }, [scan]);
 
       React.useEffect(function () {
         const style = document.createElement('style');
@@ -101,7 +112,7 @@ window.__ModuleLoader__.load({
             if (stopped) return;
             setScan(function (prev) {
               if (!prev || prev.done) return prev;
-              return { open: true, done: false, qr: prev.qr, status: '面板接口没响应 · 需要重启一次 DSH' };
+              return { open: true, done: false, qr: prev.qr, expiresAt: prev.expiresAt || (Date.now() + 300000), status: '面板接口没响应 · 需要重启一次 DSH' };
             });
           });
           fetch('/lanyuxi/qr?t=' + Date.now(), { cache: 'no-store' }).then(function (r) {
@@ -112,13 +123,13 @@ window.__ModuleLoader__.load({
             const old = lastUrl; lastUrl = url;
             setScan(function (prev) {
               if (prev && prev.done) return prev;
-              return { open: true, done: false, qr: url, status: '用手机 QQ 扫一下（登录的是小号）' };
+              return { open: true, done: false, qr: url, expiresAt: (prev && prev.expiresAt) || (Date.now() + 300000), status: '用手机 QQ 扫一下（登录的是小号）' };
             });
             if (old) URL.revokeObjectURL(old);
           }).catch(function () {});
         }
         function onScan() {
-          setScan({ open: true, done: false, qr: null, status: '正在启动 NapCat…' });
+          setScan({ open: true, done: false, qr: null, expiresAt: Date.now() + 300000, status: '正在启动 NapCat…' });
           fetch('/lanyuxi/start', { method: 'POST' }).then(function (r) {
             if (!r.ok) throw new Error('http ' + r.status);
           }).catch(function () {
@@ -146,9 +157,14 @@ window.__ModuleLoader__.load({
         let dead = false;
         fetch('/lanyuxi/status', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (s) {
           if (dead) return;
-          const label = s && s.connected ? '重新扫码' : '扫码登录';
-          const nodes = document.querySelectorAll('.lyx-scope button[onclick*="openScan(\'qq\')"]');
-          for (let i = 0; i < nodes.length; i++) nodes[i].textContent = label;
+          const nodes = document.querySelectorAll('.lyx-scope button[onclick*="openScan"]');
+          for (let i = 0; i < nodes.length; i++) {
+            const isQq = (nodes[i].getAttribute('onclick') || '').indexOf("'qq'") >= 0;
+            const bound = Boolean(s && s.connected && isQq);
+            nodes[i].textContent = bound ? '重新扫码' : '扫码绑定';
+            if (bound) nodes[i].setAttribute('data-bound', '1');
+            else nodes[i].removeAttribute('data-bound');
+          }
           const cards = document.querySelectorAll('.lyx-scope .card');
           for (let i = 0; i < cards.length; i++) {
             const text = cards[i].textContent || '';
@@ -170,6 +186,10 @@ window.__ModuleLoader__.load({
 
       const notice = null;
 
+      const remain = scan && scan.expiresAt ? Math.max(0, scan.expiresAt - tick) : 0;
+      const mmss = String(Math.floor(remain / 60000)).padStart(2, '0') + ':' + String(Math.floor((remain % 60000) / 1000)).padStart(2, '0');
+      const pct = Math.max(0, Math.min(100, remain / 3000));
+
       const modal = scan ? h('div', { className: 'mask on' },
         h('div', { className: 'modal' },
           h('h2', null, '登录 QQ 小号'),
@@ -179,6 +199,9 @@ window.__ModuleLoader__.load({
               scan.qr
                 ? h('img', { src: scan.qr, width: 180, height: 180, alt: '二维码' })
                 : h('div', { style: { width: 180, height: 180, display: 'grid', placeItems: 'center', color: '#8b98a8', fontSize: 12 } }, '正在生成二维码…'))),
+          scan.done ? null : h('div', { className: 'mexp' },
+            h('div', { className: 'top' }, h('span', null, '当前二维码有效时间'), h('span', null, remain > 0 ? mmss : '已过期 · 请重新打开')),
+            h('div', { className: 'bar' }, h('i', { style: { width: pct + '%' } }))),
           h('div', { className: 'mstate' + (scan.done ? ' ok' : '') }, scan.status),
           h('div', { className: 'mact' },
             h('button', { className: 'btn', onClick: function () { window.dispatchEvent(new CustomEvent('lyx-scan-close')); } }, '关闭'),
