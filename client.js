@@ -27,6 +27,8 @@ window.__ModuleLoader__.load({
 .lyx-scope .btn[onclick*="openScan"]{background:linear-gradient(140deg,#3f6fe0,#5b8cff) !important;border-color:transparent !important;color:#fff !important;font-weight:600}
 .lyx-scope .btn:disabled{opacity:.55;cursor:progress}
 .lyx-scope .btn[data-bound="1"]{background:linear-gradient(140deg,#e5484d,#c62b30) !important}
+.lyx-scope .qrbox{padding:8px}
+.lyx-scope .qrbox img{display:block;border-radius:8px}
 .lyx-scope .mexp{margin:12px 0 2px;font-size:12px;color:#9fb2cc}
 .lyx-scope .mexp .top{display:flex;justify-content:space-between;margin-bottom:6px;font-weight:600}
 .lyx-scope .mexp .bar{height:6px;border-radius:99px;background:rgba(255,255,255,.12);overflow:hidden}
@@ -145,7 +147,7 @@ window.__ModuleLoader__.load({
       }, []);
 
       React.useEffect(function () {
-        let timer; let stopped = false; let lastUrl;
+        let timer; let stopped = false; let lastUrl; let lastRestart = 0;
         function poll() {
           fetch('/lanyuxi/status', { cache: 'no-store' }).then(function (r) {
             if (!r.ok) throw new Error('http ' + r.status);
@@ -166,10 +168,22 @@ window.__ModuleLoader__.load({
             });
           });
           fetch('/lanyuxi/qr?t=' + Date.now(), { cache: 'no-store' }).then(function (r) {
-            return r.ok ? r.blob() : null;
-          }).then(function (b) {
-            if (!b || stopped) return;
-            const url = URL.createObjectURL(b);
+            if (r.ok) return r.blob().then(function (b) { return { ok: true, blob: b }; });
+            return r.json().catch(function () { return {}; }).then(function (j) { return { ok: false, error: (j && j.error) || '' }; });
+          }).then(function (res) {
+            if (!res || stopped) return;
+            if (!res.ok) {
+              setScan(function (prev) {
+                if (!prev || prev.done) return prev;
+                return { open: true, done: false, qr: null, expiresAt: prev.expiresAt, status: (res.error || '拿不到二维码') + ' · 正在重启 NapCat…' };
+              });
+              if (!lastRestart || Date.now() - lastRestart > 8000) {
+                lastRestart = Date.now();
+                fetch('/lanyuxi/start', { method: 'POST' }).catch(function () {});
+              }
+              return;
+            }
+            const url = URL.createObjectURL(res.blob);
             const old = lastUrl; lastUrl = url;
             setScan(function (prev) {
               if (prev && prev.done) return prev;
@@ -249,7 +263,7 @@ window.__ModuleLoader__.load({
 
       const modal = scan ? h('div', { className: 'mask on' },
         h('div', { className: 'modal' },
-          h('h2', null, '登录 QQ'),
+          h('h2', null, 'QQ 扫码'),
           h('div', { className: 'm-sub' }, '扫这一次就够：登录后账号、WS 端口、token 全部自动写回'),
           h('div', { className: 'qrwrap' },
             h('div', { className: 'qrbox' },

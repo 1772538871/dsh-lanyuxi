@@ -411,6 +411,8 @@ export function apply(ctx, rawConfig) {
         if (url.pathname === "/lanyuxi/qr") {
           try {
             if (!existsSync(qrPath)) return send(404, { error: "还没有二维码（NapCat 可能没在跑）" })
+            const age = Date.now() - statSync(qrPath).mtimeMs
+            if (age > 5 * 60 * 1000) return send(409, { error: "二维码已过期（NapCat 没在跑）", ageMs: age })
             const buf = readFileSync(qrPath)
             res.setHeader("x-qr-mtime", String(statSync(qrPath).mtimeMs))
             return send(200, buf, "image/png")
