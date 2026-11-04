@@ -397,6 +397,14 @@ export function apply(ctx, rawConfig) {
           const result = stopNapcat()
           return send(result.ok ? 200 : 500, result)
         }
+        if (url.pathname === "/lanyuxi/webui") {
+          let token = ""
+          try {
+            const raw = readFileSync(join(config.napcatDir, "napcat", "config", "webui.json"), "utf8")
+            token = JSON.parse(raw).token ?? ""
+          } catch {}
+          return send(200, { url: config.napcatPanel, token })
+        }
         if (url.pathname === "/lanyuxi/qr") {
           try {
             if (!existsSync(qrPath)) return send(404, { error: "还没有二维码（NapCat 可能没在跑）" })

@@ -95,7 +95,13 @@ window.__ModuleLoader__.load({
 
         /* 原型里的按钮都靠全局函数，这里补上（没接上的就明说） */
         window.toast = window.toast || lyxToast;
-        window.openNapcat = function () { window.open('http://127.0.0.1:6100', '_blank', 'noopener'); };
+        window.openNapcat = function () {
+          fetch('/lanyuxi/webui', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+            if (d && d.token && navigator.clipboard) { navigator.clipboard.writeText(d.token).catch(function () {}); }
+            window.open((d && d.url) || 'http://127.0.0.1:6100', '_blank', 'noopener');
+            if (d && d.token) lyxToast('NapCat 密码已复制到剪贴板，粘贴即可登录');
+          }).catch(function () { window.open('http://127.0.0.1:6100', '_blank', 'noopener'); });
+        };
         window.runTest = window.runTest || function () { lyxToast('收发测试还没接上（M2 做）'); };
         window.openScan = function (which) {
           if (which && which !== 'qq') { lyxToast('这个平台还没接（M5 / M6）'); return; }
@@ -136,6 +142,7 @@ window.__ModuleLoader__.load({
               clearInterval(timer); timer = null;
               window.dispatchEvent(new CustomEvent('lyx-refresh'));
               setScan({ open: true, done: true, qr: null, status: '登录成功 · 已连接 ' + (s.selfId || '') });
+              setTimeout(function () { window.dispatchEvent(new CustomEvent('lyx-scan-close')); }, 1200);
             }
           }).catch(function () {
             if (stopped) return;
@@ -152,7 +159,7 @@ window.__ModuleLoader__.load({
             const old = lastUrl; lastUrl = url;
             setScan(function (prev) {
               if (prev && prev.done) return prev;
-              return { open: true, done: false, qr: url, expiresAt: (prev && prev.expiresAt) || (Date.now() + 300000), status: '用手机 QQ 扫一下（登录的是小号）' };
+              return { open: true, done: false, qr: url, expiresAt: (prev && prev.expiresAt) || (Date.now() + 300000), status: '用手机 QQ 扫一下' };
             });
             if (old) URL.revokeObjectURL(old);
           }).catch(function () {});
@@ -228,7 +235,7 @@ window.__ModuleLoader__.load({
 
       const modal = scan ? h('div', { className: 'mask on' },
         h('div', { className: 'modal' },
-          h('h2', null, '登录 QQ 小号'),
+          h('h2', null, '登录 QQ'),
           h('div', { className: 'm-sub' }, '扫这一次就够：登录后账号、WS 端口、token 全部自动写回'),
           h('div', { className: 'qrwrap' },
             h('div', { className: 'qrbox' },
@@ -242,7 +249,7 @@ window.__ModuleLoader__.load({
           h('div', { className: 'mact' },
             h('button', { className: 'btn', onClick: function () { window.dispatchEvent(new CustomEvent('lyx-scan-close')); } }, '关闭'),
             scan.done
-              ? h('button', { className: 'btn primary', onClick: function () { window.open('http://127.0.0.1:6100', '_blank', 'noopener'); } }, '打开 NapCat 面板')
+              ? h('button', { className: 'btn primary', onClick: function () { window.openNapcat(); } }, '打开 NapCat 面板')
               : null))) : null;
 
       React.useEffect(function () {
