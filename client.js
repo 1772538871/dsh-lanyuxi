@@ -64,6 +64,7 @@ window.__ModuleLoader__.load({
     function LanyuxiSettings() {
       const [tab, setTab] = React.useState('platforms');
       const [scan, setScan] = React.useState(null);
+      const boundRef = React.useRef(false);
       const [tick, setTick] = React.useState(Date.now());
       React.useEffect(function () {
         if (!scan || scan.done) return;
@@ -83,6 +84,18 @@ window.__ModuleLoader__.load({
         window.runTest = window.runTest || function () { lyxToast('收发测试还没接上（M2 做）'); };
         window.openScan = function (which) {
           if (which && which !== 'qq') { lyxToast('这个平台还没接（M5 / M6）'); return; }
+          if (boundRef && boundRef.current) {
+
+            fetch('/lanyuxi/stop', { method: 'POST' }).then(function (r) {
+              if (!r.ok) throw new Error('http ' + r.status);
+              lyxToast('已退出绑定，正在关闭 NapCat');
+            }).catch(function () {
+              lyxToast('退出绑定失败：面板接口不可用（重启 DSH 后再试）');
+            }).then(function () {
+              setTimeout(function () { window.dispatchEvent(new CustomEvent('lyx-refresh')); }, 2500);
+            });
+            return;
+          }
           window.dispatchEvent(new CustomEvent('lyx-scan'));
         };
         window.tryVoice = window.tryVoice || function () { lyxToast('语音还没接（M4 做）'); };
@@ -155,13 +168,15 @@ window.__ModuleLoader__.load({
 
       React.useEffect(function () {
         let dead = false;
+        function sync() {
         fetch('/lanyuxi/status', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (s) {
           if (dead) return;
+          boundRef.current = Boolean(s && s.connected);
           const nodes = document.querySelectorAll('.lyx-scope button[onclick*="openScan"]');
           for (let i = 0; i < nodes.length; i++) {
             const isQq = (nodes[i].getAttribute('onclick') || '').indexOf("'qq'") >= 0;
             const bound = Boolean(s && s.connected && isQq);
-            nodes[i].textContent = bound ? '重新扫码' : '扫码绑定';
+            nodes[i].textContent = bound ? '退出绑定' : '扫码绑定';
             if (bound) nodes[i].setAttribute('data-bound', '1');
             else nodes[i].removeAttribute('data-bound');
           }
@@ -171,7 +186,10 @@ window.__ModuleLoader__.load({
             if (text.indexOf('第一次用') >= 0) cards[i].style.display = 'none';
           }
         }).catch(function () {});
-        return function () { dead = true; };
+        }
+        sync();
+        window.addEventListener('lyx-refresh', sync);
+        return function () { dead = true; window.removeEventListener('lyx-refresh', sync); };
       }, [tab]);
 
       const bar = h('div', { style: { display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 14 } },

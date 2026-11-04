@@ -348,6 +348,19 @@ export function apply(ctx, rawConfig) {
     }
   }
 
+  function stopNapcat() {
+    try {
+      const pattern = config.napcatDir.replace(/'/g, "''")
+      const script = "Get-Process | Where-Object { $_.Path -like '" + pattern + "*' -or $_.ProcessName -eq 'NapCatWinBootMain' } | Stop-Process -Force -ErrorAction SilentlyContinue"
+      spawn("powershell", ["-NoProfile", "-Command", script], { detached: true, stdio: "ignore", windowsHide: true }).unref()
+      logger.info?.("[lanyuxi] 已请求关闭 NapCat")
+      return { ok: true }
+    } catch (error) {
+      logger.warn?.("[lanyuxi] 关闭 NapCat 失败: " + String(error))
+      return { ok: false, error: String(error) }
+    }
+  }
+
   let routeRegistered = false
   ctx.inject(["webServer"], (sctx) => {
     sctx.effect(() => {
@@ -367,6 +380,10 @@ export function apply(ctx, rawConfig) {
         }
         if (url.pathname === "/lanyuxi/start") {
           const result = startNapcat()
+          return send(result.ok ? 200 : 500, result)
+        }
+        if (url.pathname === "/lanyuxi/stop") {
+          const result = stopNapcat()
           return send(result.ok ? 200 : 500, result)
         }
         if (url.pathname === "/lanyuxi/qr") {
