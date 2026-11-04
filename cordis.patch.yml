@@ -1,0 +1,13 @@
+# 蓝余汐 · 插件行
+- insert:
+    - id: lanyuxi
+      name: dsh-lanyuxi
+      config:
+        napcatDir: E:\NapCat
+        ownerQq: "1772538871"
+        allowGroups:
+          - "1126049389"
+        sessionCwd: E:\dsh-foundry\lanyuxi-home
+        cooldownMs: 300000
+        maxOutboundPerDay: 20
+        maxProactivePerDay: 3

@@ -1,0 +1,25 @@
+{
+  "name": "dsh-lanyuxi",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "蓝余汐 · 住在电脑里的 AI 网友（DSH 插件）",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./cordis.patch.yml": "./cordis.patch.yml"
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
