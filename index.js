@@ -197,8 +197,50 @@ export function apply(ctx, rawConfig) {
     return sessionId
   }
 
-  /** 把消息灌进她那个会话，让她醒过来。 */
+  let agentHandle = null
+
+  /** 把消息灌进她那个会话，让她醒过来。优先走 agents 直连，失败再退回 sessionController。 */
   async function deliver(text) {
+    const agents = ctx.get("agents")
+    if (agents) {
+      try {
+        let agent = agents.get("lanyuxi-main")
+        if (!agent) {
+          try {
+            agentHandle = await agents.create({
+              sessionId: "lanyuxi-main",
+              meta: { cwd: config.sessionCwd || process.cwd() },
+            })
+            agent = agentHandle.agent
+            diag.via = "agents.create"
+          } catch (createError) {
+            agentHandle = await agents.resume({ resumeSessionId: "lanyuxi-main" })
+            agent = agentHandle.agent
+            diag.via = "agents.resume"
+          }
+        }
+        const message = {
+          id: randomUUID(),
+          role: "user",
+          content: [{ type: "text", text }],
+          source: { kind: "user" },
+          time: Date.now(),
+        }
+        for (const method of ["followup", "queue", "send", "prompt"]) {
+          if (typeof agent[method] === "function") {
+            await agent[method](message)
+            diag.via = "agent." + method
+            return
+          }
+        }
+        throw new Error("Agent 上没有可用的投递方法: " + Object.keys(agent).join(","))
+      } catch (error) {
+        diag.via = "agents.failed"
+        diag.lastError = String(error)
+        logger.warn?.("[lanyuxi] agents 投递失败: " + String(error))
+        agentHandle = null
+      }
+    }
     const controller = ctx.get("sessionController")
     if (!controller) throw new Error("sessionController 不可用")
     const id = await ensureSession()
@@ -208,6 +250,7 @@ export function apply(ctx, rawConfig) {
       mode: "queue",
       content: [{ type: "text", text }],
     })
+    diag.via = "sessionController.prompt"
   }
 
   function connect() {
@@ -425,6 +468,14 @@ export function apply(ctx, rawConfig) {
         if (url.pathname === "/lanyuxi/stop") {
           const result = stopNapcat()
           return send(result.ok ? 200 : 500, result)
+        }
+        if (url.pathname === "/lanyuxi/selftest") {
+          try {
+            await deliver("【自检】有人吗？")
+            return send(200, { ok: true, via: diag.via, delivered: diag.delivered })
+          } catch (error) {
+            return send(500, { ok: false, via: diag.via, error: String(error), lastError: diag.lastError })
+          }
         }
         if (url.pathname === "/lanyuxi/diag") {
           return send(200, { ...diag, connected, selfId, ownerQq: config.ownerQq, allowGroups: config.allowGroups })
