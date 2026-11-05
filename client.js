@@ -100,10 +100,9 @@ window.__ModuleLoader__.load({
         window.toast = window.toast || lyxToast;
         window.openNapcat = function () {
           fetch('/lanyuxi/webui', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
-            if (d && d.token && navigator.clipboard) { navigator.clipboard.writeText(d.token).catch(function () {}); }
-            window.open((d && d.url) || 'http://127.0.0.1:6100', '_blank', 'noopener');
-            if (d && d.token) lyxToast('NapCat 密码已复制到剪贴板，粘贴即可登录');
-          }).catch(function () { window.open('http://127.0.0.1:6100', '_blank', 'noopener'); });
+            window.open((d && d.url) || 'http://127.0.0.1:6100/webui', '_blank', 'noopener');
+            if (d && d.token) lyxToast('已用 token 直接登录 NapCat 面板');
+          }).catch(function () { window.open('http://127.0.0.1:6100/webui', '_blank', 'noopener'); });
         };
         window.runTest = window.runTest || function () { lyxToast('收发测试还没接上（M2 做）'); };
         window.openScan = function (which) {
@@ -260,7 +259,7 @@ window.__ModuleLoader__.load({
               }).then(function (d) {
                 vt.disabled = false; vt.textContent = '测试收发';
                 window.dispatchEvent(new CustomEvent('lyx-refresh'));
-                lyxToast(d && d.ok ? ('收发正常 · QQ ' + d.selfId) : ('测试失败：' + ((d && d.detail) || '未知')));
+                lyxToast(d && d.ok ? (d.sent ? ('测试消息已发到你的 QQ · ' + d.selfId) : ('收发正常 · QQ ' + d.selfId)) : ('测试失败：' + ((d && d.detail) || '未知')));
               }).catch(function () {
                 vt.disabled = false; vt.textContent = '测试收发';
                 lyxToast('测试失败：接口不可用');

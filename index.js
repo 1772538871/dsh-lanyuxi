@@ -419,10 +419,19 @@ export function apply(ctx, rawConfig) {
           try {
             const info = await request("get_login_info", {})
             const st = await request("get_status", {})
-            verified = true
-            verifyDetail = "API 往返正常"
             selfId = String(info?.user_id ?? selfId)
-            return send(200, { ok: true, selfId, online: st?.online, detail: verifyDetail })
+            let sent = false
+            if (config.ownerQq) {
+              const stamp = new Date().toLocaleTimeString("zh-CN", { hour12: false })
+              await request("send_private_msg", {
+                user_id: Number(config.ownerQq),
+                message: [{ type: "text", data: { text: "【蓝余汐】收发测试 " + stamp } }],
+              })
+              sent = true
+            }
+            verified = true
+            verifyDetail = sent ? "已向主人发送测试消息" : "API 往返正常"
+            return send(200, { ok: true, selfId, online: st?.online, sent, detail: verifyDetail })
           } catch (error) {
             verified = false
             verifyDetail = String(error)
@@ -435,7 +444,9 @@ export function apply(ctx, rawConfig) {
             const raw = readFileSync(join(config.napcatDir, "napcat", "config", "webui.json"), "utf8")
             token = JSON.parse(raw).token ?? ""
           } catch {}
-          return send(200, { url: config.napcatPanel, token })
+          const base = (config.napcatPanel || "http://127.0.0.1:6100").replace(/\/+$/, "")
+          const url = token ? (base + "/webui?token=" + encodeURIComponent(token)) : (base + "/webui")
+          return send(200, { url, token })
         }
         if (url.pathname === "/lanyuxi/qr") {
           try {
