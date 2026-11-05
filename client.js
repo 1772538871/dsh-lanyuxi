@@ -232,6 +232,41 @@ window.__ModuleLoader__.load({
             if (bound) nodes[i].setAttribute('data-bound', '1');
             else nodes[i].removeAttribute('data-bound');
           }
+          function paint(id, cls, text) {
+            const el = document.querySelector('.lyx-scope #' + id);
+            if (!el) return;
+            el.className = cls;
+            el.textContent = text;
+          }
+          if (s && s.connected && s.verified) {
+            paint('st-qq', 'pill ok', '已登录 · 已验证');
+            paint('ov-qq', 'pill ok', '已登录 · 已验证');
+          } else if (s && s.connected) {
+            paint('st-qq', 'pill warn', '待测试');
+            paint('ov-qq', 'pill warn', '待测试');
+          } else {
+            paint('st-qq', 'pill off', '未绑定');
+            paint('ov-qq', 'pill off', '未绑定');
+          }
+          const vs = document.querySelector('.lyx-scope #vs-qq');
+          if (vs) vs.textContent = s && s.connected && s.verified ? ('收发正常 · QQ ' + (s.selfId || '')) : '凭据已保存，但还没验证过能不能收发';
+          const vt = document.querySelector('.lyx-scope #vt-qq');
+          if (vt && vt.dataset.wired !== '1') {
+            vt.dataset.wired = '1';
+            vt.onclick = function () {
+              vt.disabled = true; vt.textContent = '测试中…';
+              fetch('/lanyuxi/test', { method: 'POST' }).then(function (r) {
+                return r.json().catch(function () { return { ok: false, detail: 'http ' + r.status }; });
+              }).then(function (d) {
+                vt.disabled = false; vt.textContent = '测试收发';
+                window.dispatchEvent(new CustomEvent('lyx-refresh'));
+                lyxToast(d && d.ok ? ('收发正常 · QQ ' + d.selfId) : ('测试失败：' + ((d && d.detail) || '未知')));
+              }).catch(function () {
+                vt.disabled = false; vt.textContent = '测试收发';
+                lyxToast('测试失败：接口不可用');
+              });
+            };
+          }
           const cards = document.querySelectorAll('.lyx-scope .card');
           for (let i = 0; i < cards.length; i++) {
             const text = cards[i].textContent || '';

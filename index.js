@@ -93,6 +93,8 @@ export function apply(ctx, rawConfig) {
   let backoff = 1000
   let selfId = ""
   let connected = false
+  let verified = false
+  let verifyDetail = ""
   let pending = new Map()
   let echoSeq = 1
   let lastChat
@@ -231,7 +233,16 @@ export function apply(ctx, rawConfig) {
       request("get_login_info", {}).then((data) => {
         selfId = String(data?.user_id ?? "")
         logger.info?.(`[lanyuxi] 登录中的 QQ: ${selfId} (${data?.nickname ?? "?"})`)
-      }).catch(() => {})
+        return request("get_status", {})
+      }).then(() => {
+        verified = true
+        verifyDetail = "API 往返正常"
+        logger.info?.("[lanyuxi] 收发校验通过")
+      }).catch((error) => {
+        verified = false
+        verifyDetail = String(error)
+        logger.warn?.("[lanyuxi] 收发校验失败: " + verifyDetail)
+      })
     }
     ws.onmessage = (event) => {
       let payload
@@ -249,6 +260,7 @@ export function apply(ctx, rawConfig) {
     }
     ws.onclose = () => {
       connected = false
+      verified = false
       for (const [, slot] of pending) slot.reject(new Error("连接已断开"))
       pending = new Map()
       scheduleReconnect()
@@ -316,6 +328,8 @@ export function apply(ctx, rawConfig) {
         allowGroups: config.allowGroups,
         napcatPanel: config.napcatPanel,
         webRoutes: routeRegistered,
+        verified,
+        verifyDetail,
         qrFileSeen: existsSync(join(config.napcatDir, "napcat", "cache", "qrcode.png")),
       }, null, 2)
     },
@@ -390,7 +404,7 @@ export function apply(ctx, rawConfig) {
           res.end(typeof body === "string" || Buffer.isBuffer(body) ? body : JSON.stringify(body))
         }
         if (url.pathname === "/lanyuxi/status") {
-          return send(200, { connected, selfId, allowGroups: config.allowGroups, panel: config.napcatPanel })
+          return send(200, { connected, verified, verifyDetail, selfId, todaySent: quota.count, lastChat: lastChat?.chatKey ?? null, allowGroups: config.allowGroups, panel: config.napcatPanel })
         }
         if (url.pathname === "/lanyuxi/start") {
           const result = startNapcat()
@@ -399,6 +413,21 @@ export function apply(ctx, rawConfig) {
         if (url.pathname === "/lanyuxi/stop") {
           const result = stopNapcat()
           return send(result.ok ? 200 : 500, result)
+        }
+        if (url.pathname === "/lanyuxi/test") {
+          if (!connected) return send(503, { ok: false, detail: "还没连上 NapCat" })
+          try {
+            const info = await request("get_login_info", {})
+            const st = await request("get_status", {})
+            verified = true
+            verifyDetail = "API 往返正常"
+            selfId = String(info?.user_id ?? selfId)
+            return send(200, { ok: true, selfId, online: st?.online, detail: verifyDetail })
+          } catch (error) {
+            verified = false
+            verifyDetail = String(error)
+            return send(500, { ok: false, detail: verifyDetail })
+          }
         }
         if (url.pathname === "/lanyuxi/webui") {
           let token = ""
