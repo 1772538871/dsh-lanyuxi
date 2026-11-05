@@ -175,6 +175,7 @@ export function apply(ctx, rawConfig) {
     const prompt = [
       `【QQ · ${messageType === "group" ? "群聊" : "私聊"}】${who} 说：${text}`,
       `要回话就调用 qq_send 工具（不填 target 默认回给当前这个聊天）。不想回就别调用，不调用等于不说话。`,
+      `（今天是 ${dayTitle()}，你今天的会话是 ${dayKey()}；昨天是 ${dayKey(yesterday())}。主人提到以前的事，可以用会话检索工具查对应日期的会话。）`,
     ].join("\n")
 
     await deliver(prompt)
@@ -199,26 +200,52 @@ export function apply(ctx, rawConfig) {
 
   let agentHandle = null
 
-  /** 把消息灌进她那个会话，让她醒过来。优先走 agents 直连，失败再退回 sessionController。 */
+  const z2 = (n) => String(n).padStart(2, "0")
+  function dayKey(d = new Date()) {
+    return "lanyuxi-" + d.getFullYear() + z2(d.getMonth() + 1) + z2(d.getDate())
+  }
+  function dayTitle(d = new Date()) {
+    return "蓝余汐 " + String(d.getFullYear()).slice(2) + "-" + z2(d.getMonth() + 1) + "-" + z2(d.getDate())
+  }
+  function yesterday() {
+    const d = new Date()
+    d.setDate(d.getDate() - 1)
+    return d
+  }
+
+  /** 每天一个会话：第一次说话时创建，之后复用；跨天自动换新会话。 */
+  async function ensureAgentForToday() {
+    const agents = ctx.get("agents")
+    const key = dayKey()
+    let agent = agents.get(key)
+    if (agent) return agent
+    try {
+      const handle = await agents.create({ sessionId: key, meta: { cwd: config.sessionCwd || process.cwd() } })
+      agent = handle.agent
+      agentHandle = handle
+      diag.via = "create:" + key
+    } catch (createError) {
+      const handle = await agents.resume({ resumeSessionId: key })
+      agent = handle.agent
+      agentHandle = handle
+      diag.via = "resume:" + key
+    }
+    diag.dayKey = key
+    try {
+      const sc = ctx.get("sessionController")
+      if (sc && typeof sc.rename === "function") await sc.rename({ sessionId: key, title: dayTitle() })
+    } catch (renameError) {
+      diag.renameError = String(renameError)
+    }
+    return agent
+  }
+
+  /** 把消息灌进她今天的会话，让她醒过来。 */
   async function deliver(text) {
     const agents = ctx.get("agents")
     if (agents) {
       try {
-        let agent = agents.get("lanyuxi-main")
-        if (!agent) {
-          try {
-            agentHandle = await agents.create({
-              sessionId: "lanyuxi-main",
-              meta: { cwd: config.sessionCwd || process.cwd() },
-            })
-            agent = agentHandle.agent
-            diag.via = "agents.create"
-          } catch (createError) {
-            agentHandle = await agents.resume({ resumeSessionId: "lanyuxi-main" })
-            agent = agentHandle.agent
-            diag.via = "agents.resume"
-          }
-        }
+        const agent = await ensureAgentForToday()
         const message = {
           id: randomUUID(),
           role: "user",
@@ -226,14 +253,14 @@ export function apply(ctx, rawConfig) {
           source: { kind: "user" },
           time: Date.now(),
         }
-        for (const method of ["followup", "queue", "send", "prompt"]) {
+        for (const method of ["followup", "queue", "send"]) {
           if (typeof agent[method] === "function") {
             await agent[method](message)
-            diag.via = "agent." + method
+            diag.via = "agent." + method + ":" + dayKey()
             return
           }
         }
-        throw new Error("Agent 上没有可用的投递方法: " + Object.keys(agent).join(","))
+        throw new Error("Agent 上没有可用的投递方法")
       } catch (error) {
         diag.via = "agents.failed"
         diag.lastError = String(error)
