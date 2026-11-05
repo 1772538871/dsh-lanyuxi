@@ -218,7 +218,7 @@ export function apply(ctx, rawConfig) {
     return new Date(anchor.getTime() + idx * 3 * DAY_MS)
   }
   function bucketKey(d = new Date()) {
-    return "lanyuxi-" + ymd(bucketStart(d))
+    return "lanyuxi-msg-" + ymd(bucketStart(d))
   }
   function bucketTitle(d = new Date()) {
     const s = bucketStart(d)
@@ -236,7 +236,7 @@ export function apply(ctx, rawConfig) {
   }
   function prevBucketKey(d = new Date()) {
     const s = bucketStart(d)
-    return "lanyuxi-" + ymd(new Date(s.getTime() - DAY_MS))
+    return "lanyuxi-msg-" + ymd(new Date(s.getTime() - DAY_MS))
   }
   /** 每三天一个会话：第一次说话时创建，之后复用；跨桶自动换新会话。 */
   async function ensureAgentForBucket() {
