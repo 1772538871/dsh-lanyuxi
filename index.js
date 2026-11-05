@@ -175,7 +175,7 @@ export function apply(ctx, rawConfig) {
     const prompt = [
       `【QQ · ${messageType === "group" ? "群聊" : "私聊"}】${who} 说：${text}`,
       `要回话就调用 qq_send 工具（不填 target 默认回给当前这个聊天）。不想回就别调用，不调用等于不说话。`,
-      `（今天是 ${dayTitle()}，你今天的会话是 ${dayKey()}；昨天是 ${dayKey(yesterday())}。主人提到以前的事，可以用会话检索工具查对应日期的会话。）`,
+      `（当前会话是 ${bucketTitle()}，id=${bucketKey()}；上一段是 ${prevBucketKey()}。主人提到以前的事，可以用会话检索工具查对应日期的会话。）`,
     ].join("\n")
 
     await deliver(prompt)
@@ -201,22 +201,33 @@ export function apply(ctx, rawConfig) {
   let agentHandle = null
 
   const z2 = (n) => String(n).padStart(2, "0")
-  function dayKey(d = new Date()) {
-    return "lanyuxi-" + d.getFullYear() + z2(d.getMonth() + 1) + z2(d.getDate())
-  }
-  function dayTitle(d = new Date()) {
-    return "蓝余汐 " + String(d.getFullYear()).slice(2) + "-" + z2(d.getMonth() + 1) + "-" + z2(d.getDate())
-  }
-  function yesterday() {
-    const d = new Date()
-    d.setDate(d.getDate() - 1)
-    return d
-  }
+  const DAY_MS = 86400000
+  const ymd = (d) => "" + d.getFullYear() + z2(d.getMonth() + 1) + z2(d.getDate())
+  const md = (d) => z2(d.getMonth() + 1) + "-" + z2(d.getDate())
 
-  /** 每天一个会话：第一次说话时创建，之后复用；跨天自动换新会话。 */
-  async function ensureAgentForToday() {
+  /** 每 3 天一个会话：以当年 1 月 1 日为锚点固定分桶，跨年也会重新对齐。 */
+  function bucketStart(d = new Date()) {
+    const anchor = new Date(d.getFullYear(), 0, 1)
+    const today = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+    const idx = Math.floor((today.getTime() - anchor.getTime()) / DAY_MS / 3)
+    return new Date(anchor.getTime() + idx * 3 * DAY_MS)
+  }
+  function bucketKey(d = new Date()) {
+    return "lanyuxi-" + ymd(bucketStart(d))
+  }
+  function bucketTitle(d = new Date()) {
+    const s = bucketStart(d)
+    const e = new Date(s.getTime() + 2 * DAY_MS)
+    return "蓝余汐 " + md(s) + "~" + md(e)
+  }
+  function prevBucketKey(d = new Date()) {
+    const s = bucketStart(d)
+    return "lanyuxi-" + ymd(new Date(s.getTime() - DAY_MS))
+  }
+  /** 每三天一个会话：第一次说话时创建，之后复用；跨桶自动换新会话。 */
+  async function ensureAgentForBucket() {
     const agents = ctx.get("agents")
-    const key = dayKey()
+    const key = bucketKey()
     let agent = agents.get(key)
     if (agent) return agent
     try {
@@ -233,7 +244,7 @@ export function apply(ctx, rawConfig) {
     diag.dayKey = key
     try {
       const sc = ctx.get("sessionController")
-      if (sc && typeof sc.rename === "function") await sc.rename({ sessionId: key, title: dayTitle() })
+      if (sc && typeof sc.rename === "function") await sc.rename({ sessionId: key, title: bucketTitle() })
     } catch (renameError) {
       diag.renameError = String(renameError)
     }
@@ -245,7 +256,7 @@ export function apply(ctx, rawConfig) {
     const agents = ctx.get("agents")
     if (agents) {
       try {
-        const agent = await ensureAgentForToday()
+        const agent = await ensureAgentForBucket()
         const message = {
           id: randomUUID(),
           role: "user",
@@ -256,7 +267,7 @@ export function apply(ctx, rawConfig) {
         for (const method of ["followup", "queue", "send"]) {
           if (typeof agent[method] === "function") {
             await agent[method](message)
-            diag.via = "agent." + method + ":" + dayKey()
+            diag.via = "agent." + method + ":" + bucketKey()
             return
           }
         }
