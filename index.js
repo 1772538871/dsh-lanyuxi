@@ -94,6 +94,7 @@ export function apply(ctx, rawConfig) {
   let selfId = ""
   let connected = false
   let verified = false
+  const diag = { events: 0, messages: 0, droppedSelf: 0, droppedGroup: 0, droppedPrivate: 0, droppedEmpty: 0, duplicates: 0, delivered: 0, deliverErrors: 0, lastError: "", recent: [] }
   let verifyDetail = ""
   let pending = new Map()
   let echoSeq = 1
@@ -141,8 +142,9 @@ export function apply(ctx, rawConfig) {
 
   async function handleEvent(event) {
     if (event.post_type !== "message") return
-    if (event.user_id !== undefined && String(event.user_id) === selfId) return
+    if (event.user_id !== undefined && String(event.user_id) === selfId) { diag.droppedSelf += 1; return }
 
+    diag.messages += 1
     const messageType = event.message_type
     const groupId = event.group_id === undefined ? "" : String(event.group_id)
     const userId = String(event.user_id ?? "")
@@ -150,19 +152,19 @@ export function apply(ctx, rawConfig) {
     const atMe = segments.some((s) => s?.type === "at" && String(s?.data?.qq) === selfId)
     const text = segments.filter((s) => s?.type === "text").map((s) => s?.data?.text ?? "").join("").trim()
       || (typeof event.raw_message === "string" ? event.raw_message.trim() : "")
-    if (!text) return
+    if (!text) { diag.droppedEmpty += 1; return }
 
     if (messageType === "group") {
-      if (!config.allowGroups.includes(groupId)) return
+      if (!config.allowGroups.includes(groupId)) { diag.droppedGroup += 1; return }
       const free = config.freeGroups.includes(groupId)
-      if (!free && !atMe) return
+      if (!free && !atMe) { diag.droppedGroup += 1; return }
     } else if (messageType === "private") {
-      if (config.ownerQq && userId !== config.ownerQq) return
+      if (config.ownerQq && userId !== config.ownerQq) { diag.droppedPrivate += 1; return }
     } else {
       return
     }
 
-    if (remember(event.message_id)) return
+    if (remember(event.message_id)) { diag.duplicates += 1; return }
 
     const chatKey = chatKeyOf(messageType, groupId, userId)
     lastChat = { messageType, groupId, userId, chatKey }
@@ -176,6 +178,7 @@ export function apply(ctx, rawConfig) {
     ].join("\n")
 
     await deliver(prompt)
+    diag.delivered += 1
   }
 
   async function ensureSession() {
@@ -256,7 +259,16 @@ export function apply(ctx, rawConfig) {
         }
         return
       }
-      handleEvent(payload).catch((error) => logger.warn?.("[lanyuxi] 处理消息失败: " + String(error)))
+      diag.events += 1
+      try {
+        diag.recent.unshift({ t: payload.post_type, mt: payload.message_type, uid: payload.user_id, gid: payload.group_id, txt: (payload.raw_message || "").slice(0, 40), at: Date.now() })
+        if (diag.recent.length > 12) diag.recent.length = 12
+      } catch {}
+      handleEvent(payload).catch((error) => {
+        diag.deliverErrors += 1
+        diag.lastError = String(error)
+        logger.warn?.("[lanyuxi] 处理消息失败: " + String(error))
+      })
     }
     ws.onclose = () => {
       connected = false
@@ -413,6 +425,9 @@ export function apply(ctx, rawConfig) {
         if (url.pathname === "/lanyuxi/stop") {
           const result = stopNapcat()
           return send(result.ok ? 200 : 500, result)
+        }
+        if (url.pathname === "/lanyuxi/diag") {
+          return send(200, { ...diag, connected, selfId, ownerQq: config.ownerQq, allowGroups: config.allowGroups })
         }
         if (url.pathname === "/lanyuxi/test") {
           if (!connected) return send(503, { ok: false, detail: "还没连上 NapCat" })
