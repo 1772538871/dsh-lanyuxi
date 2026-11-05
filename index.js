@@ -177,7 +177,7 @@ export function apply(ctx, rawConfig) {
     diag.freshSession = false
     const prompt = [
       `【QQ · ${messageType === "group" ? "群聊" : "私聊"}】${who} 说：${text}`,
-      `要回话就调用 qq_send 工具（不填 target 默认回给当前这个聊天）。不想回就别调用，不调用等于不说话。`,
+      `必须用 qq_send 工具回一句话（不填 target 默认回给当前这个聊天）。只在会话里回答、不调用 qq_send，主人是收不到的。`,
       fresh ? `【新会话】这是「${bucketTitle()}」的第一条。上一段会话的 id 是 ${prevBucketKey()}，主人提到以前的事先用会话检索去查这个 id 再回答。`
             : `（当前会话 ${bucketKey()}，覆盖 ${bucketTitle()}；上一段是 ${prevBucketKey()}。需要回忆旧事就去检索那个 id。）`,
     ].join("\n")
@@ -258,6 +258,11 @@ export function apply(ctx, rawConfig) {
       diag.freshSession = false
     }
     diag.dayKey = key
+    try {
+      if (workspace && typeof workspace.attachSession === "function") await workspace.attachSession(key)
+    } catch (attachError) {
+      diag.attachError = String(attachError)
+    }
     return agent
   }
 
@@ -524,6 +529,17 @@ export function apply(ctx, rawConfig) {
       return { ok: false, error: String(error) }
     }
   }
+
+  let workspace = null
+  ctx.inject(["workspaceRegistry"], (sctx) => {
+    sctx.effect(() => {
+      let alive = true
+      sctx.workspaceRegistry.create(config.sessionCwd, "蓝余汐")
+        .then((ws) => { workspace = ws; diag.workspace = ws.title + " @ " + ws.path })
+        .catch((error) => { diag.workspaceError = String(error) })
+      return () => { alive = false }
+    }, "lanyuxi: 工作区")
+  })
 
   let routeRegistered = false
   ctx.inject(["webServer"], (sctx) => {

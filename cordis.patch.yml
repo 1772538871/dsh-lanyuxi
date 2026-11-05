@@ -7,7 +7,7 @@
         ownerQq: "1772538871"
         allowGroups:
           - "1126049389"
-        sessionCwd: E:\dsh-foundry\lanyuxi-home
+        sessionCwd: E:\dsh-foundry\lanyuxi-msg
         cooldownMs: 300000
         maxOutboundPerDay: 20
         maxProactivePerDay: 3
