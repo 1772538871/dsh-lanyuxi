@@ -172,12 +172,17 @@ export function apply(ctx, rawConfig) {
     const who = messageType === "group"
       ? `群 ${groupId} 里的 ${event.sender?.card || event.sender?.nickname || userId}`
       : "主人"
+    try { await ensureAgentForBucket() } catch {}
+    const fresh = Boolean(diag.freshSession)
+    diag.freshSession = false
     const prompt = [
       `【QQ · ${messageType === "group" ? "群聊" : "私聊"}】${who} 说：${text}`,
       `要回话就调用 qq_send 工具（不填 target 默认回给当前这个聊天）。不想回就别调用，不调用等于不说话。`,
-      `（当前会话是 ${bucketTitle()}，id=${bucketKey()}；上一段是 ${prevBucketKey()}。主人提到以前的事，可以用会话检索工具查对应日期的会话。）`,
+      fresh ? `【新会话】这是「${bucketTitle()}」的第一条。上一段会话的 id 是 ${prevBucketKey()}，主人提到以前的事先用会话检索去查这个 id 再回答。`
+            : `（当前会话 ${bucketKey()}，覆盖 ${bucketTitle()}；上一段是 ${prevBucketKey()}。需要回忆旧事就去检索那个 id。）`,
     ].join("\n")
 
+    await titleForBucket(bucketKey(), text)
     await deliver(prompt)
     diag.delivered += 1
   }
@@ -220,6 +225,15 @@ export function apply(ctx, rawConfig) {
     const e = new Date(s.getTime() + 2 * DAY_MS)
     return "蓝余汐 " + md(s) + "~" + md(e)
   }
+  function cnRange(d = new Date()) {
+    const s = bucketStart(d)
+    const e = new Date(s.getTime() + 2 * DAY_MS)
+    const sm = s.getMonth() + 1
+    const em = e.getMonth() + 1
+    return em === sm
+      ? sm + "月" + s.getDate() + "号到" + e.getDate() + "号"
+      : sm + "月" + s.getDate() + "号到" + em + "月" + e.getDate() + "号"
+  }
   function prevBucketKey(d = new Date()) {
     const s = bucketStart(d)
     return "lanyuxi-" + ymd(new Date(s.getTime() - DAY_MS))
@@ -229,26 +243,55 @@ export function apply(ctx, rawConfig) {
     const agents = ctx.get("agents")
     const key = bucketKey()
     let agent = agents.get(key)
-    if (agent) return agent
+    if (agent) { diag.freshSession = false; return agent }
     try {
       const handle = await agents.create({ sessionId: key, meta: { cwd: config.sessionCwd || process.cwd() } })
       agent = handle.agent
       agentHandle = handle
       diag.via = "create:" + key
+      diag.freshSession = true
     } catch (createError) {
       const handle = await agents.resume({ resumeSessionId: key })
       agent = handle.agent
       agentHandle = handle
       diag.via = "resume:" + key
+      diag.freshSession = false
     }
     diag.dayKey = key
+    return agent
+  }
+
+  let titledBucket = ""
+
+  /** 用当天第一句话当话题，标题形如「在吗—11月3号到5号」。 */
+  async function titleForBucket(key, sample) {
+    if (titledBucket === key) return
+    const topic = String(sample).replace(/\s+/g, " ").trim().slice(0, 12) || "聊天"
+    const title = topic + "—" + cnRange()
+    try {
+      const st = ctx.get("sessionTitle")
+      const agents = ctx.get("agents")
+      const agent = agents ? agents.get(key) : undefined
+      const session = agent && agent.session
+      if (st && session && typeof st.rename === "function") {
+        st.rename(session, title)
+        titledBucket = key
+        diag.title = "service:" + title
+        return
+      }
+    } catch (error) {
+      diag.titleError = String(error)
+    }
     try {
       const sc = ctx.get("sessionController")
-      if (sc && typeof sc.rename === "function") await sc.rename({ sessionId: key, title: bucketTitle() })
-    } catch (renameError) {
-      diag.renameError = String(renameError)
+      if (sc && typeof sc.rename === "function") {
+        await sc.rename({ sessionId: key, title })
+        titledBucket = key
+        diag.title = "remote:" + title
+      }
+    } catch (error) {
+      diag.titleError = String(error)
     }
-    return agent
   }
 
   /** 把消息灌进她今天的会话，让她醒过来。 */
