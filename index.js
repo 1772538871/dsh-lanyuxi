@@ -175,7 +175,7 @@ export function apply(ctx, rawConfig) {
       atMe,
       selfId,
       segTypes: segments.map((s) => s?.type).join(","),
-      text: String(text).slice(0, 60),
+      raw: String(event.raw_message || "").slice(0, 80),
     }
     let text = segments.filter((s) => s?.type === "text").map((s) => s?.data?.text ?? "").join("").trim()
     if (!text && typeof event.raw_message === "string") text = event.raw_message.trim()
@@ -1109,7 +1109,7 @@ export function apply(ctx, rawConfig) {
     wonder.repliedAt = Date.now()
     saveWonder()
   }
-  const outbox = []  const outbox = []
+  const outbox = []
   function drainOutbox() {
     if (!outbox.length || !connected) return
     const now = Date.now()
@@ -1502,7 +1502,6 @@ export function apply(ctx, rawConfig) {
     return () => clearInterval(backupTimer)
   }, "lanyuxi: 会话备份")
 
-  ctx.effect(() => {
   ctx.effect(() => {
     const queueTimer = setInterval(drainOutbox, 2000)
     return () => clearInterval(queueTimer)
