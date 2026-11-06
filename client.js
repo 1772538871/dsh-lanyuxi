@@ -84,7 +84,7 @@ window.__ModuleLoader__.load({
     function LanyuxiSettings() {
       const [tab, setTab] = React.useState('platforms');
       const [scan, setScan] = React.useState(null);
-      const [roll, setRoll] = React.useState({ percent: 70, used: 0, limit: 0, segment: 0 });
+      const [roll, setRoll] = React.useState({ percent: 50, used: 0, limit: 0, segment: 0 });
       React.useEffect(function () {
         let dead = false;
         function load() {
@@ -363,6 +363,7 @@ window.__ModuleLoader__.load({
       return h('div', { className: 'lyx-scope lyx-layout' },
         h('aside', { className: 'lyx-rail', dangerouslySetInnerHTML: { __html: NAV } }),
         h('div', { className: 'lyx-main' },
+          rollBar,
           notice,
           h('div', { dangerouslySetInnerHTML: { __html: VIEWS[tab] || '' } })),
         modal);
