@@ -764,23 +764,32 @@ export function apply(ctx, rawConfig) {
   // —— 她能用的工具：发言 ——
   ctx.tools.register({
     name: "qq_send",
-    description: "在 QQ 上发一句话。不填 target_type/target_id 时，回给最近一次来找她的那个聊天。受白名单、冷却与每日上限约束，超了会被拒绝并说明原因。",
+    description: "在 QQ 上发消息，可以是文字、也可以是图片/表情（image 填本地绝对路径，必须在她的 lanyuxi-home 里）。不填 target_type/target_id 时回给最近一次来找她的那个聊天。受白名单、冷却、每日上限与守门员约束。",
     parameters: {
       type: "object",
       additionalProperties: false,
       properties: {
-        text: { type: "string", description: "要说的话。" },
+        text: { type: "string", description: "要说的话。只发图时可以不给。" },
+        image: { type: "string", description: "要发的图片/表情的本地绝对路径（必须在 lanyuxi-home 下，比如 stickers\\coy\\xxx.gif）。" },
         target_type: { type: "string", enum: ["group", "private"], description: "发给群还是私聊；默认沿用最近一次收到消息的聊天。" },
         target_id: { type: "string", description: "群号或 QQ 号；默认沿用最近一次收到消息的聊天。" },
       },
-      required: ["text"],
+      required: [],
     },
     output: {
       schema: { type: "string" },
       render: (_args, value) => [{ type: "text", text: value }],
     },
     async execute(args) {
-      if (typeof args?.text !== "string" || args.text.trim() === "") throw new Error("text 不能为空")
+      const hasText = typeof args?.text === "string" && args.text.trim() !== ""
+      const hasImage = typeof args?.image === "string" && args.image.trim() !== ""
+      if (!hasText && !hasImage) throw new Error("text 和 image 至少给一个")
+      if (hasImage) {
+        const imgPath = String(args.image).trim()
+        const home = String(config.homeDir || "E:\\dsh-foundry\\lanyuxi-home").toLowerCase()
+        if (!imgPath.toLowerCase().startsWith(home)) throw new Error("只能发 lanyuxi-home 里的图，别的路径不许发")
+        if (!existsSync(imgPath)) throw new Error("找不到这个文件：" + imgPath)
+      }
       const type = args.target_type ?? lastChat?.messageType
       const rawId = args.target_id ?? (type === "group" ? lastChat?.groupId : lastChat?.userId)
       if (!type || !rawId) throw new Error("不知道发给谁：先等一条消息，或者显式给 target")
@@ -791,7 +800,7 @@ export function apply(ctx, rawConfig) {
       const chatKey = type === "group" ? `group:${id}` : `private:${id}`
       if (muted()) throw new Error("现在是静音时间，她一句话都不会说（面板可以取消静音）")
       if (brakes.socialPaused && type === "group") throw new Error("社交已暂停，她不在群里说话（私聊照常）")
-      const hit = guardCheck(args.text)
+      const hit = guardCheck(hasText ? args.text : "")
       if (hit) {
         diag.guardBlocked = (diag.guardBlocked || 0) + 1
         diag.guardLast = hit
@@ -803,7 +812,10 @@ export function apply(ctx, rawConfig) {
         if (over) throw new Error(over + "（守门员按每日群发言上限拦下的）")
       }
       const action = type === "group" ? "send_group_msg" : "send_private_msg"
-      const params = type === "group" ? { group_id: Number(id), message: [{ type: "text", data: { text: args.text } }] } : { user_id: Number(id), message: [{ type: "text", data: { text: args.text } }] }
+      const parts = []
+      if (hasText) parts.push({ type: "text", data: { text: args.text } })
+      if (hasImage) parts.push({ type: "image", data: { file: "file:///" + String(args.image).trim().replace(/\\/g, "/") } })
+      const params = type === "group" ? { group_id: Number(id), message: parts } : { user_id: Number(id), message: parts }
       const blocked = quota.check(chatKey)
       if (blocked && blocked.indexOf("冷却") < 0 && blocked.indexOf("刚在") < 0) {
         throw new Error(blocked + "（这是守门员拦下的，不是故障）")
@@ -818,7 +830,7 @@ export function apply(ctx, rawConfig) {
       if (type === "group") groupQuotaMark()
       lastActivityAt = Date.now()
 
-      appendTranscript("蓝余汐", args.text)
+      appendTranscript("蓝余汐", hasImage && !hasText ? "[图片] " + args.image : args.text)
       return `已发送到 ${chatKey}`
     },
   })
@@ -995,6 +1007,43 @@ export function apply(ctx, rawConfig) {
       return { ok: false, error: String(error) }
     }
   }
+
+  // —— 她能用的工具：收藏表情 ——
+  ctx.tools.register({
+    name: "sticker_save",
+    description: "把一张你喜欢的图/表情收藏进自己的表情包库。mood 只能是 happy（开心）/ speechless（无语）/ coy（撒娇）/ fierce（凶）。收藏后可以用 qq_send 的 image 参数把它发出去。",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        source: { type: "string", description: "要收藏的图片绝对路径，通常是 images 目录下你刚看到的那张。" },
+        mood: { type: "string", enum: ["happy", "speechless", "coy", "fierce"], description: "归到哪一档情绪。" },
+        name: { type: "string", description: "给它起的短名字（中文可以），会作为文件名。" },
+      },
+      required: ["source", "mood", "name"],
+    },
+    output: {
+      schema: { type: "string" },
+      render: (_args, value) => [{ type: "text", text: value }],
+    },
+    async execute(args) {
+      const src = String(args?.source || "").trim()
+      const mood = String(args?.mood || "").trim()
+      const rawName = String(args?.name || "").trim()
+      if (!["happy", "speechless", "coy", "fierce"].includes(mood)) throw new Error("mood 只能是 happy/speechless/coy/fierce")
+      const home = config.homeDir || "E:\\dsh-foundry\\lanyuxi-home"
+      if (!src.toLowerCase().startsWith(String(home).toLowerCase())) throw new Error("只能收藏 lanyuxi-home 里的图")
+      if (!existsSync(src)) throw new Error("找不到这个文件：" + src)
+      const ext = (src.match(/\.(gif|png|jpg|jpeg|webp)$/i) || [".gif"])[0].toLowerCase()
+      const safe = (rawName || "表情").replace(/[\\/:*?"<>|]/g, "").slice(0, 20)
+      const dir = join(home, "stickers", mood)
+      mkdirSync(dir, { recursive: true })
+      const dest = join(dir, safe + ext)
+      copyFileSync(src, dest)
+      diag.stickersSaved = (diag.stickersSaved || 0) + 1
+      return "已收藏到 " + dest + "。想用就调用 qq_send 并把 image 填成这个路径。"
+    },
+  })
 
   const outbox = []
   function drainOutbox() {
