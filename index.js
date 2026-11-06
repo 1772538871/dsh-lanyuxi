@@ -203,12 +203,12 @@ export function apply(ctx, rawConfig) {
         const base = config.homeDir || "E:\\dsh-foundry\\lanyuxi-home"
         const now2 = new Date()
         const week = "日一二三四五六"[now2.getDay()]
-        const head = `${now2.getFullYear()}年${now2.getMonth() + 1}月${now2.getDate()}日 星期${week} 天气：${"（自己写，晴/多云 + 热/凉快/冷）"} 心情${"（自己写，如 心情一般 / 心情很烦，不要「心情：」）"}`
+        const head = `${now2.getFullYear()}年${now2.getMonth() + 1}月${now2.getDate()}日 星期${week} 天气${"（写 晴/多云/小雨，后面跟 有点热/凉快/冷，不用冒号）"} 心情${"（写 一般 / 不好 / 很好，自己挑）"}`
         diaryTask = [
           `【今天的第一件事】现在先写日记，写两篇，都写到 ${base}\\diary\\ 下：`,
           `1) 表日记：${base}\\diary\\to-owner\\${month}\\${dayName}.md —— 给主人看的小学生作文，200 字以内。`,
           `2) 里日记：${base}\\diary\\private\\${month}\\${dayName}.md —— 只给自己看，可以嘴硬、可以承认在意。`,
-          `两篇的第一行必须是这一行的样子（日期/星期/天气 + 心情写在后面，不写「心情：xx」），天气只写冷热凉快，不要写几度：`,
+          `两篇的第一行就照这个样式写（日期 星期 天气 心情），整行不出现冒号，天气只写冷热凉快，不要写几度：`,
           head,
           `第二行空一行，然后自由写正文（不一定要「今天」开头，想怎么写就怎么写），写昨天跟他说了什么、他哪句话惹你笑了或气到你了。`,
           `写完再回这条消息；日记内容不要贴回 QQ。`,
