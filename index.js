@@ -20,6 +20,7 @@ const DEFAULTS = {
   freeGroups: [],
   sessionCwd: "",
   cooldownMs: 300000,
+  privateCooldownMs: 5000,
   maxOutboundPerDay: 20,
   maxProactivePerDay: 3,
   napcatPanel: "http://127.0.0.1:6100",
@@ -61,12 +62,19 @@ class Quota {
     const now = this.today()
     if (now !== this.day) { this.day = now; this.count = 0 }
   }
+  /** 私聊主人只做很短的防抖，群里才用完整冷却。 */
+  waitMs(chatKey) {
+    const cooldown = chatKey.startsWith("private:")
+      ? (this.config.privateCooldownMs ?? 5000)
+      : this.config.cooldownMs
+    const last = this.lastByChat.get(chatKey) ?? 0
+    return Math.max(0, cooldown - (Date.now() - last))
+  }
   /** 返回 undefined 表示可以发，返回字符串表示为什么不行。 */
   check(chatKey) {
     this.roll()
     if (this.count >= this.config.maxOutboundPerDay) return `今天已经说了 ${this.count} 句，到上限了`
-    const last = this.lastByChat.get(chatKey) ?? 0
-    const wait = this.config.cooldownMs - (Date.now() - last)
+    const wait = this.waitMs(chatKey)
     if (wait > 0) return `刚在 ${chatKey} 说过话，还要等 ${Math.ceil(wait / 1000)} 秒`
     return undefined
   }
@@ -253,7 +261,7 @@ export function apply(ctx, rawConfig) {
         diag.modelError = String(selectionError)
       }
       const agentOptions = selection
-        ? { provider: selection.provider, model: selection.model }
+        ? { provider: selection.provider, model: selection.model, ...(selection.reasoningEffort ? { reasoningEffort: selection.reasoningEffort } : {}) }
         : undefined
       diag.model = selection ? selection.provider + "/" + selection.model : "(默认)"
       const handle = await agents.create({ sessionId: key, meta: { cwd: config.sessionCwd || process.cwd() }, agentOptions })
@@ -455,11 +463,17 @@ export function apply(ctx, rawConfig) {
       if (type === "private" && config.ownerQq && id !== config.ownerQq) throw new Error("只能私聊主人")
 
       const chatKey = type === "group" ? `group:${id}` : `private:${id}`
-      const blocked = quota.check(chatKey)
-      if (blocked) throw new Error(blocked + "（这是守门员拦下的，不是故障）")
-
       const action = type === "group" ? "send_group_msg" : "send_private_msg"
       const params = type === "group" ? { group_id: Number(id), message: [{ type: "text", data: { text: args.text } }] } : { user_id: Number(id), message: [{ type: "text", data: { text: args.text } }] }
+      const blocked = quota.check(chatKey)
+      if (blocked && blocked.indexOf("冷却") < 0 && blocked.indexOf("刚在") < 0) {
+        throw new Error(blocked + "（这是守门员拦下的，不是故障）")
+      }
+      const wait = quota.waitMs(chatKey)
+      if (wait > 0) {
+        outbox.push({ action, params, chatKey, dueAt: Date.now() + wait })
+        return `已排队：${Math.ceil(wait / 1000)} 秒后自动发到 ${chatKey}`
+      }
       await request(action, params)
       quota.mark(chatKey)
       return `已发送到 ${chatKey}`
@@ -480,12 +494,29 @@ export function apply(ctx, rawConfig) {
         allowGroups: config.allowGroups,
         napcatPanel: config.napcatPanel,
         webRoutes: routeRegistered,
+        outbox: outbox.length,
+        queueError,
         verified,
         verifyDetail,
         qrFileSeen: existsSync(join(config.napcatDir, "napcat", "cache", "qrcode.png")),
       }, null, 2)
     },
   })
+
+  const outbox = []
+  function drainOutbox() {
+    if (!outbox.length || !connected) return
+    const now = Date.now()
+    for (let i = outbox.length - 1; i >= 0; i--) {
+      const item = outbox[i]
+      if (item.dueAt > now || quota.waitMs(item.chatKey) > 0) continue
+      outbox.splice(i, 1)
+      request(item.action, item.params)
+        .then(() => { quota.mark(item.chatKey); logger.info?.("[lanyuxi] 队列补发成功 " + item.chatKey) })
+        .catch((error) => { queueError = String(error); logger.warn?.("[lanyuxi] 队列补发失败 " + String(error)) })
+    }
+  }
+  let queueError = ""
 
   // —— 面板用的三个 HTTP 接口：起 NapCat / 取二维码 / 查状态 ——
   const qrPath = join(config.napcatDir, "napcat", "cache", "qrcode.png")
@@ -641,6 +672,11 @@ export function apply(ctx, rawConfig) {
       return dispose
     }, "lanyuxi: 面板接口")
   })
+
+  ctx.effect(() => {
+    const queueTimer = setInterval(drainOutbox, 2000)
+    return () => clearInterval(queueTimer)
+  }, "lanyuxi: 发送队列")
 
   ctx.effect(() => {
     closed = false
