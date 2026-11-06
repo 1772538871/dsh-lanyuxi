@@ -1018,6 +1018,46 @@ export function apply(ctx, rawConfig) {
             return send(500, { ok: false, via: diag.via, error: String(error), lastError: diag.lastError })
           }
         }
+        if (url.pathname === "/lanyuxi/assets") {
+          const home = config.homeDir || "E:\\dsh-foundry\\lanyuxi-home"
+          const listDir = (dir) => {
+            try {
+              if (!existsSync(dir)) return []
+              return readdirSync(dir, { withFileTypes: true })
+                .filter((e) => e.isFile())
+                .map((e) => {
+                  const st = statSync(join(dir, e.name))
+                  return { name: e.name, size: st.size, mtime: st.mtimeMs }
+                })
+                .sort((a, b) => b.mtime - a.mtime)
+            } catch { return [] }
+          }
+          const countMood = (mood) => listDir(join(home, "stickers", mood)).length
+          const monthDir = (base) => join(home, base, new Date().getFullYear() + "-" + z2(new Date().getMonth() + 1))
+          const diaryList = (kind) => {
+            const out = []
+            try {
+              const root = join(home, "diary", kind)
+              if (!existsSync(root)) return out
+              for (const month of readdirSync(root, { withFileTypes: true })) {
+                if (!month.isDirectory()) continue
+                for (const file of listDir(join(root, month.name))) out.push({ name: month.name + "/" + file.name, mtime: file.mtime })
+              }
+            } catch {}
+            return out.sort((a, b) => b.mtime - a.mtime).slice(0, 8)
+          }
+          return send(200, {
+            stickers: { happy: countMood("happy"), speechless: countMood("speechless"), coy: countMood("coy"), fierce: countMood("fierce") },
+            recentStickers: [].concat(
+              listDir(join(home, "stickers", "happy")).slice(0, 2).map((x) => ({ name: "开心/" + x.name, size: x.size })),
+              listDir(join(home, "stickers", "speechless")).slice(0, 1).map((x) => ({ name: "无语/" + x.name, size: x.size })),
+              listDir(join(home, "stickers", "coy")).slice(0, 1).map((x) => ({ name: "撒娇/" + x.name, size: x.size })),
+              listDir(join(home, "stickers", "fierce")).slice(0, 1).map((x) => ({ name: "凶/" + x.name, size: x.size })),
+            ),
+            images: listDir(monthDir("images")).slice(0, 6).map((x) => ({ name: x.name, size: x.size, mtime: x.mtime })),
+            diary: { toOwner: diaryList("to-owner"), private: diaryList("private") },
+          })
+        }
         if (url.pathname === "/lanyuxi/overview") {
           const countFiles = (dir) => {
             try {

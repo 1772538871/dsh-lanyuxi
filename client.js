@@ -343,6 +343,52 @@ window.__ModuleLoader__.load({
       }, [tab]);
 
       React.useEffect(function () {
+        if (tab !== 'assets') return;
+        const root = document.querySelector('.lyx-scope #view-assets');
+        if (!root) return;
+        let dead = false;
+        function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+        function fmtSize(n) { return n > 1048576 ? (Math.round(n / 1048576) + ' MB') : (Math.max(1, Math.round(n / 1024)) + ' KB'); }
+        function fmtDay(ms) { const d = new Date(ms); return (d.getMonth() + 1) + '-' + (d.getDate() < 10 ? '0' : '') + d.getDate(); }
+        function cardBy(kw) {
+          const cards = Array.prototype.slice.call(root.querySelectorAll('.card'));
+          return cards.filter(function (c) { const h = c.querySelector('h3'); return h && h.textContent.indexOf(kw) >= 0; })[0];
+        }
+        function fillDiary(card, items, emptyText, tagger) {
+          if (!card) return;
+          const diary = card.querySelector('.diary');
+          if (!diary) return;
+          if (!items || !items.length) {
+            diary.innerHTML = '<div class="ditem"><span>' + esc(emptyText) + '</span><span class="dt">—</span></div>';
+            return;
+          }
+          diary.innerHTML = items.map(function (it) {
+            return '<div class="ditem"><span>' + esc(it.name) + '</span><span class="dt">' + esc(tagger ? tagger(it) : '') + '</span></div>';
+          }).join('');
+        }
+        fetch('/lanyuxi/assets', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) {
+          if (dead || !d) return;
+          const st = d.stickers || {};
+          const stickerCard = cardBy('表情包');
+          if (stickerCard) {
+            const tags = stickerCard.querySelector('.tags');
+            if (tags) {
+              tags.innerHTML =
+                '<span class="tag green">开心 ' + (st.happy || 0) + '</span>' +
+                '<span class="tag blue">无语 ' + (st.speechless || 0) + '</span>' +
+                '<span class="tag pink">撒娇 ' + (st.coy || 0) + '</span>' +
+                '<span class="tag">凶 ' + (st.fierce || 0) + '</span>';
+            }
+            fillDiary(stickerCard, d.recentStickers, '还没有表情包，等她存了才显示', function (x) { return fmtSize(x.size); });
+          }
+          fillDiary(cardBy('图片'), (d.images || []).map(function (x) { return { name: x.name, mtime: x.mtime }; }), '图片库还是空的', function (x) { return fmtDay(x.mtime); });
+          fillDiary(cardBy('表日记'), (d.diary && d.diary.toOwner) || [], '还没写过表日记', function (x) { return fmtDay(x.mtime); });
+          fillDiary(cardBy('里日记'), (d.diary && d.diary.private) || [], '还没写过里日记', function (x) { return fmtDay(x.mtime); });
+        }).catch(function () {});
+        return function () { dead = true; };
+      }, [tab]);
+
+      React.useEffect(function () {
         if (tab !== 'platforms') return;
         const root = document.querySelector('.lyx-scope #view-platforms');
         if (!root) return;
