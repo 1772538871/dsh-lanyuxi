@@ -974,7 +974,14 @@ export function apply(ctx, rawConfig) {
     return join(config.sessionCwd || process.cwd(), "backup")
   }
   let lastActivityAt = 0
-  let lastBackupAt = Date.now()
+  let lastBackupAt = 0
+  try {
+    const root = join(config.sessionCwd || process.cwd(), "backup")
+    if (existsSync(root)) {
+      const stamps = readdirSync(root).sort()
+      if (stamps.length) lastBackupAt = statSync(join(root, stamps[stamps.length - 1])).mtimeMs
+    }
+  } catch {}
 
   /** 会话目录在 since 之后有没有新写入。 */
   function sessionsChangedSince(since) {
@@ -1588,7 +1595,7 @@ export function apply(ctx, rawConfig) {
     const backupTimer = setInterval(() => {
       if (!settings.backupEnabled) return
       const interval = (settings.backupHours || 24) * 60 * 60 * 1000
-      if (Date.now() - lastBackupAt < interval) return
+      if (lastBackupAt && Date.now() - lastBackupAt < interval) return
       const idle = !lastActivityAt || Date.now() - lastActivityAt > 12 * 60 * 60 * 1000
       if (idle) return
       if (!sessionsChangedSince(lastBackupAt)) return
