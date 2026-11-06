@@ -985,6 +985,52 @@ export function apply(ctx, rawConfig) {
             return send(500, { ok: false, via: diag.via, error: String(error), lastError: diag.lastError })
           }
         }
+        if (url.pathname === "/lanyuxi/overview") {
+          const countFiles = (dir) => {
+            try {
+              if (!existsSync(dir)) return 0
+              let n = 0
+              const stack = [dir]
+              while (stack.length) {
+                const cur = stack.pop()
+                for (const entry of readdirSync(cur, { withFileTypes: true })) {
+                  if (entry.isDirectory()) stack.push(join(cur, entry.name))
+                  else n += 1
+                }
+              }
+              return n
+            } catch { return 0 }
+          }
+          const home = config.homeDir || "E:\\dsh-foundry\\lanyuxi-home"
+          const recent = []
+          try {
+            const dir = join(config.sessionCwd || process.cwd(), "transcript", new Date().getFullYear() + "-" + z2(new Date().getMonth() + 1))
+            const file = join(dir, z2(new Date().getDate()) + ".md")
+            if (existsSync(file)) {
+              const lines = readFileSync(file, "utf8").split(/\r?\n/).filter(Boolean)
+              for (const line of lines.slice(-10).reverse()) recent.push(line)
+            }
+          } catch {}
+          const cur = sessionState.current
+          return send(200, {
+            connected, verified, selfId, ownerQq: config.ownerQq,
+            muted: muted(), socialPaused: Boolean(brakes.socialPaused), biliPaused: Boolean(brakes.biliPaused),
+            todaySent: quota.count,
+            maxOutboundPerDay: config.maxOutboundPerDay,
+            received: diag.messages,
+            blocked: diag.guardBlocked || 0,
+            mutedSkip: diag.mutedSkip || 0,
+            socialSkip: diag.socialSkip || 0,
+            session: cur ? { id: cur.id, segment: sessionState.seq || 1, chars: cur.chars, limit: currentLimit(), percent: Math.round(cur.chars / currentLimit() * 100) } : null,
+            recent,
+            assets: {
+              stickers: countFiles(join(home, "stickers")),
+              images: countFiles(join(home, "images")),
+              diary: countFiles(join(home, "diary")),
+              backups: existsSync(join(config.sessionCwd || process.cwd(), "backup")) ? readdirSync(join(config.sessionCwd || process.cwd(), "backup")).length : 0,
+            },
+          })
+        }
         if (url.pathname === "/lanyuxi/brakes") {
           const snapshot = () => ({
             muted: muted(),

@@ -341,6 +341,59 @@ window.__ModuleLoader__.load({
       }, [tab]);
 
       React.useEffect(function () {
+        if (tab !== 'overview') return;
+        const view = document.querySelector('.lyx-scope #view-overview');
+        if (!view) return;
+        let dead = false;
+        function esc(s) {
+          return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+        function row(k, v, tone) {
+          return '<div class="row"><div><div class="lbl">' + esc(k) + '</div></div><span class="pill ' + (tone || '') + '">' + esc(v) + '</span></div>';
+        }
+        fetch('/lanyuxi/overview', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) {
+          if (dead || !d) return;
+          const dot = d.connected ? (d.verified ? 'ok' : 'warn') : 'bad';
+          const dotText = d.connected ? (d.verified ? '在线 · 收发正常' : '在线 · 待验证') : '掉线';
+          const brakes = [];
+          if (d.muted) brakes.push('静音中');
+          if (d.socialPaused) brakes.push('社交暂停');
+          if (d.biliPaused) brakes.push('B 站已停');
+          const recentHtml = (d.recent && d.recent.length)
+            ? d.recent.map(function (l) { return '<div class="ditem"><span>' + esc(l.replace(/^- /, '')) + '</span></div>'; }).join('')
+            : '<div class="ditem"><span>今天还没有聊天记录</span></div>';
+          view.innerHTML =
+            '<div class="grid g2">' +
+              '<div class="card"><h3>她现在怎样 <span class="pill ' + dot + '">' + esc(dotText) + '</span></h3>' +
+                '<div class="kv">' +
+                  row('QQ 小号', d.selfId || '—') +
+                  row('主人', d.ownerQq || '—') +
+                  row('刹车', brakes.length ? brakes.join(' / ') : '全部松开', brakes.length ? 'warn' : 'ok') +
+                  row('今天说了', (d.todaySent || 0) + ' / ' + (d.maxOutboundPerDay || 20) + ' 句') +
+                '</div></div>' +
+              '<div class="card"><h3>这一段会话</h3>' +
+                '<div class="kv">' +
+                  (d.session
+                    ? row('会话 id', d.session.id) + row('第几段', String(d.session.segment)) + row('已用', d.session.percent + '%（' + d.session.chars + ' / ' + d.session.limit + ' 字符）', d.session.percent >= 80 ? 'warn' : 'ok')
+                    : row('会话', '还没开始聊天')) +
+                  row('收消息', (d.received || 0) + ' 条') +
+                  row('守门员拦下', (d.blocked || 0) + ' 次', d.blocked ? 'warn' : '') +
+                '</div></div>' +
+            '</div>' +
+            '<div class="grid g2">' +
+              '<div class="card"><h3>今天的时间线</h3><div class="diary">' + recentHtml + '</div></div>' +
+              '<div class="card"><h3>家（素材）</h3><div class="kv">' +
+                row('表情包', (d.assets ? d.assets.stickers : 0) + ' 张') +
+                row('图片', (d.assets ? d.assets.images : 0) + ' 张') +
+                row('日记', (d.assets ? d.assets.diary : 0) + ' 篇') +
+                row('会话备份', (d.assets ? d.assets.backups : 0) + ' 份') +
+              '</div></div>' +
+            '</div>';
+        }).catch(function () {});
+        return function () { dead = true; };
+      }, [tab]);
+
+      React.useEffect(function () {
         if (tab !== 'guard') return;
         const root = document.querySelector('.lyx-scope #view-guard');
         if (!root) return;
