@@ -15,5 +15,4 @@
         rolloverPercent: 50
         cooldownMs: 300000
         maxOutboundPerDay: 20
-        maxProactivePerDay: 3
         groupOutboundPerDay: 10

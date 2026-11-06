@@ -28,7 +28,6 @@ const DEFAULTS = {
   contextWindowTokens: 1048576,
   charsPerToken: 1,
   maxOutboundPerDay: 20,
-  maxProactivePerDay: 3,
 
   napcatPanel: "http://127.0.0.1:6100",
 }
