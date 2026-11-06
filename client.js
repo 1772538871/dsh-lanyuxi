@@ -341,6 +341,48 @@ window.__ModuleLoader__.load({
       }, [tab]);
 
       React.useEffect(function () {
+        if (tab !== 'platforms') return;
+        const root = document.querySelector('.lyx-scope #view-platforms');
+        if (!root) return;
+        let dead = false;
+        fetch('/lanyuxi/overview', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) {
+          if (dead || !d) return;
+          const cards = Array.prototype.slice.call(root.querySelectorAll('.card'));
+          const qqCard = cards.filter(function (c) {
+            const h = c.querySelector('h3');
+            return h && h.textContent.indexOf('QQ') >= 0;
+          })[0];
+          if (!qqCard) return;
+          const nm = qqCard.querySelector('.nm');
+          if (nm && d.selfNickname) {
+            const first = Array.prototype.slice.call(nm.childNodes).filter(function (n) { return n.nodeType === 3; })[0];
+            if (first) first.textContent = d.selfNickname + ' ';
+          }
+          const acc = qqCard.querySelector('.nm .acc');
+          if (acc && d.selfId) acc.textContent = d.selfId;
+          const pav = qqCard.querySelector('.pav');
+          if (pav && d.selfId && d.connected) {
+            const original = pav.innerHTML;
+            const badge = pav.querySelector('.pbadge');
+            pav.innerHTML = '';
+            const img = document.createElement('img');
+            img.src = 'https://q1.qlogo.cn/g?b=qq&nk=' + d.selfId + '&s=640';
+            img.alt = d.selfNickname || d.selfId;
+            img.style.cssText = 'width:100%;height:100%;border-radius:10px;object-fit:cover;display:block';
+            img.onerror = function () { pav.innerHTML = original; };
+            pav.appendChild(img);
+            if (badge) pav.appendChild(badge);
+          }
+          const sub = qqCard.querySelector('.sub');
+          if (sub) {
+            const groups = (d.allowGroups || []).length;
+            sub.textContent = groups + ' 个白名单群 · 今日发言 ' + (d.todaySent || 0) + ' 条';
+          }
+        }).catch(function () {});
+        return function () { dead = true; };
+      }, [tab]);
+
+      React.useEffect(function () {
         if (tab !== 'overview') return;
         const root = document.querySelector('.lyx-scope #view-overview');
         if (!root) return;
