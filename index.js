@@ -413,12 +413,17 @@ export function apply(ctx, rawConfig) {
     const day = ymd(now)
     const limit = currentLimit()
     let cur = sessionState.current
+    if (cur && (typeof cur.id !== "string" || !cur.id.startsWith("lanyuxi-msg2-"))) {
+      // 老会话可能是"没有模型"的坏会话，直接弃用，开新的
+      cur = null
+      sessionState.current = null
+    }
     let fresh = false
     let newDay = false
     if (!cur || cur.chars + textLength > limit) {
       sessionState.seq = (sessionState.seq || 0) + 1
       cur = {
-        id: "lanyuxi-msg-" + String(sessionState.seq).padStart(3, "0"),
+        id: "lanyuxi-msg2-" + String(sessionState.seq).padStart(3, "0"),
         chars: 0,
         firstDay: day,
         lastDay: day,
@@ -609,7 +614,7 @@ export function apply(ctx, rawConfig) {
       diag.via = "create:" + key
       diag.freshSession = true
     } catch (createError) {
-      const handle = await agents.resume({ resumeSessionId: key, setup: setupAgentPrompt })
+      const handle = await agents.resume({ resumeSessionId: key, agentOptions, setup: setupAgentPrompt })
       agent = handle.agent
       agentHandle = handle
       diag.via = "resume:" + key
