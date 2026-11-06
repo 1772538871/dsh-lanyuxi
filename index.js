@@ -203,7 +203,7 @@ export function apply(ctx, rawConfig) {
         const base = config.homeDir || "E:\\dsh-foundry\\lanyuxi-home"
         const now2 = new Date()
         const week = "日一二三四五六"[now2.getDay()]
-        const head = `${now2.getFullYear()}年${now2.getMonth() + 1}月${now2.getDate()}日 星期${week} 天气${"（写 晴/多云/小雨，后面跟 有点热/凉快/冷，不用冒号）"} 心情${"（写 一般 / 不好 / 很好，自己挑）"}`
+        const head = `${now2.getFullYear()}年${now2.getMonth() + 1}月${now2.getDate()}日 星期${week} 天气${"（写 晴/多云/小雨，后面跟 有点热/凉快/冷，不用冒号）"} 心情${"（随手写一个词，如 一般 / 开心 / 烦）"}`
         diaryTask = [
           `【今天的第一件事】现在先写日记，写两篇，都写到 ${base}\\diary\\ 下：`,
           `1) 表日记：${base}\\diary\\to-owner\\${month}\\${dayName}.md —— 给主人看的小学生作文，200 字以内。`,
@@ -218,12 +218,7 @@ export function apply(ctx, rawConfig) {
     const seg = segmentInfo(text.length)
     const prevId = (sessionState.current && sessionState.current.prevId) || ""
     lastActivityAt = Date.now()
-    moodDecay()
-    const praise = /(厉害|好看|可爱|喜欢你|想你|乖|棒|谢谢)/.test(text)
-    const scold = /(滚|烦|闭嘴|别吵|讨厌|笨|蠢)/.test(text)
-    if (praise) bumpMood(4, "被夸了")
-    else if (scold) bumpMood(-6, "被凶了")
-    else bumpMood(1, "聊上了")
+
     appendTranscript(messageType === "group" ? ("群" + groupId + " " + who) : ownerLabel(), text)
     try { await ensureAgentForBucket(seg.id) } catch {}
     const fresh = Boolean(diag.freshSession)
@@ -517,7 +512,7 @@ export function apply(ctx, rawConfig) {
           if (cur) lines.push(`当前会话 ${id}（第 ${sessionState.seq || 1} 段）。`)
           if (prev) lines.push(`上一段会话的 id 是 ${prev}；主人提到以前的事，先用会话检索去查那个 id 再回答。`)
           else lines.push("这是第一段会话，没有更早的记录。")
-          lines.push(`现在时间：${stampNow()}。${moodHint()}`)
+          lines.push(`现在时间：${stampNow()}`)
           return lines.join("\n")
         },
       })
@@ -783,12 +778,7 @@ export function apply(ctx, rawConfig) {
       quota.mark(chatKey)
       if (type === "group") groupQuotaMark()
       lastActivityAt = Date.now()
-    moodDecay()
-    const praise = /(厉害|好看|可爱|喜欢你|想你|乖|棒|谢谢)/.test(text)
-    const scold = /(滚|烦|闭嘴|别吵|讨厌|笨|蠢)/.test(text)
-    if (praise) bumpMood(4, "被夸了")
-    else if (scold) bumpMood(-6, "被凶了")
-    else bumpMood(1, "聊上了")
+
       appendTranscript("蓝余汐", args.text)
       return `已发送到 ${chatKey}`
     },
@@ -853,51 +843,6 @@ export function apply(ctx, rawConfig) {
     try { writeFileSync(brakesPath(), JSON.stringify(brakes, null, 2), "utf8") } catch (error) { diag.brakesError = String(error) }
   }
   function muted() { return Date.now() < Number(brakes.muteUntil || 0) }
-
-  // —— 情感系统：好感度 0~100 驱动心情，像 galgame 的攻略副本 ——
-  const moodPath = () => join(config.sessionCwd || process.cwd(), ".lanyuxi-mood.json")
-  const mood = { affection: 55, lastTouch: 0, lastReason: "" }
-  try {
-    if (existsSync(moodPath())) Object.assign(mood, JSON.parse(readFileSync(moodPath(), "utf8")))
-  } catch {}
-  function saveMood() {
-    try { writeFileSync(moodPath(), JSON.stringify(mood, null, 2), "utf8") } catch (error) { diag.moodError = String(error) }
-  }
-  function bumpMood(delta, reason) {
-    const before = mood.affection
-    mood.affection = Math.max(0, Math.min(100, mood.affection + delta))
-    mood.lastReason = reason
-    mood.lastTouch = Date.now()
-    if (before !== mood.affection) saveMood()
-  }
-  /** 她心里的状态，只说成"感觉"，永远不报分数。 */
-  function moodPhrase() {
-    const a = mood.affection
-    if (a >= 85) return "心情特别好"
-    if (a >= 70) return "心情不错"
-    if (a >= 50) return "心情一般"
-    if (a >= 30) return "心情有点烦"
-    if (a >= 15) return "心情很烦"
-    return "心情差到不想说话"
-  }
-  /** 给模型的私下感受，不带任何数字。 */
-  function moodHint() {
-    const a = mood.affection
-    if (a >= 85) return "你现在挺高兴的，话会多一点，也愿意先开口。"
-    if (a >= 70) return "你现在心情不错，愿意接话，偶尔会主动关心他一句。"
-    if (a >= 50) return "你现在说不上好也说不上坏，正常聊，不会格外热络。"
-    if (a >= 30) return "你现在有点闷，话短，不太想解释太多。"
-    if (a >= 15) return "你现在挺烦的，回得短、带点刺，但不至于不理人。"
-    return "你现在心情很差，能少说就少说；他要是没做错什么，你也别发火，只是不想热络。"
-  }
-  /** 长时间没人理她会掉心情；一次最多掉 12，避免醒来就翻脸。 */
-  function moodDecay() {
-    if (!mood.lastTouch) return
-    const hours = (Date.now() - mood.lastTouch) / 3600000
-    if (hours < 6) return
-    const drop = Math.min(12, Math.floor(hours / 6) * 3)
-    if (drop > 0) bumpMood(-drop, "太久没人理")
-  }
 
   // —— 纯文本对话记录：给人看、给以后做 RAG 用 ——
   function transcriptPath(d = new Date()) {
@@ -1141,13 +1086,6 @@ export function apply(ctx, rawConfig) {
           } catch (error) {
             return send(500, { ok: false, error: String(error) })
           }
-        }
-        if (url.pathname === "/lanyuxi/mood") {
-          if (req.method === "POST") {
-            const v = Number(url.searchParams.get("affection"))
-            if (Number.isFinite(v) && v >= 0 && v <= 100) { mood.affection = Math.round(v); mood.lastTouch = Date.now(); saveMood() }
-          }
-          return send(200, { phrase: moodPhrase(), lastReason: mood.lastReason, lastTouch: mood.lastTouch })
         }
         if (url.pathname === "/lanyuxi/assets") {
           const home = config.homeDir || "E:\\dsh-foundry\\lanyuxi-home"
