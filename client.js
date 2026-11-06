@@ -347,11 +347,8 @@ window.__ModuleLoader__.load({
         let dead = false;
         fetch('/lanyuxi/overview', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) {
           if (dead || !d) return;
-          const cards = Array.prototype.slice.call(root.querySelectorAll('.card'));
-          const qqCard = cards.filter(function (c) {
-            const h = c.querySelector('h3');
-            return h && h.textContent.indexOf('QQ') >= 0;
-          })[0];
+          const qqPill = root.querySelector('#st-qq');
+          const qqCard = qqPill ? qqPill.closest('.card') : root.querySelector('.card');
           if (!qqCard) return;
           const nm = qqCard.querySelector('.nm');
           if (nm && d.selfNickname) {
@@ -376,7 +373,7 @@ window.__ModuleLoader__.load({
           const sub = qqCard.querySelector('.sub');
           if (sub) {
             const groups = (d.allowGroups || []).length;
-            sub.textContent = groups + ' 个白名单群 · 今日发言 ' + (d.todaySent || 0) + ' 条';
+            sub.textContent = groups + ' 个白名单群 · 今日发言 ' + (d.sentToday || 0) + ' 条';
           }
         }).catch(function () {});
         return function () { dead = true; };
@@ -405,7 +402,7 @@ window.__ModuleLoader__.load({
             if (d.mood) setText(hero.querySelector('.quote'), '「' + d.mood + '」');
             const when = (d.recent || [])[0];
             const m = when ? when.match(/^- (\d{2}:\d{2})/) : null;
-            setText(hero.querySelector('.who'), m ? ('刚才 ' + m[1] + ' · 今天聊了 ' + (d.received || 0) + ' 句') : '今天还没聊过');
+            setText(hero.querySelector('.who'), m ? ('刚才 ' + m[1] + ' · 今天聊了 ' + (d.receivedToday || 0) + ' 句') : '今天还没聊过');
           }
 
           const qqCard = cardBy('QQ');
@@ -430,7 +427,7 @@ window.__ModuleLoader__.load({
               pav.appendChild(img);
               if (badge) pav.appendChild(badge);
             }
-            setText(qqCard.querySelector('.sub'), '今日发言 ' + (d.todaySent || 0) + ' 条');
+            setText(qqCard.querySelector('.sub'), '今日发言 ' + (d.sentToday || 0) + ' 条');
           }
 
           const timeline = cardBy('她今天怎么过的');

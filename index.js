@@ -1031,11 +1031,17 @@ export function apply(ctx, rawConfig) {
           }
           const home = config.homeDir || "E:\\dsh-foundry\\lanyuxi-home"
           const recent = []
+          let sentToday = 0
+          let receivedToday = 0
           try {
             const dir = join(config.sessionCwd || process.cwd(), "transcript", new Date().getFullYear() + "-" + z2(new Date().getMonth() + 1))
             const file = join(dir, z2(new Date().getDate()) + ".md")
             if (existsSync(file)) {
               const lines = readFileSync(file, "utf8").split(/\r?\n/).filter(Boolean)
+              for (const line of lines) {
+                if (line.indexOf("**蓝余汐**") >= 0) sentToday += 1
+                else receivedToday += 1
+              }
               for (const line of lines.slice(-10).reverse()) recent.push(line)
             }
           } catch {}
@@ -1044,7 +1050,9 @@ export function apply(ctx, rawConfig) {
             connected, verified, selfId, selfNickname, ownerQq: config.ownerQq,
             mood: moodLine(),
             muted: muted(), socialPaused: Boolean(brakes.socialPaused), biliPaused: Boolean(brakes.biliPaused),
-            todaySent: quota.count,
+            todaySent: sentToday || quota.count,
+            sentToday,
+            receivedToday,
             maxOutboundPerDay: config.maxOutboundPerDay,
             received: diag.messages,
             blocked: diag.guardBlocked || 0,
