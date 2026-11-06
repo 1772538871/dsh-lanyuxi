@@ -5,8 +5,10 @@
  * 配置里读，不再让主人填一遍。她在 DSH 里只有一个会话，所有聊天都汇进这一个大脑。
  */
 
-import { readFileSync, existsSync, mkdirSync, writeFileSync, statSync } from "node:fs"
-import { join } from "node:path"
+import { readFileSync, existsSync, mkdirSync, writeFileSync, statSync, unlinkSync, rmdirSync } from "node:fs"
+import { join, basename, dirname } from "node:path"
+import { homedir } from "node:os"
+import { readdirSync, copyFileSync, appendFileSync } from "node:fs"
 import { randomUUID } from "node:crypto"
 import { spawn, spawnSync } from "node:child_process"
 
@@ -185,6 +187,7 @@ export function apply(ctx, rawConfig) {
       : "主人"
     const seg = segmentInfo(text.length)
     const prevId = (sessionState.current && sessionState.current.prevId) || ""
+    appendTranscript(messageType === "group" ? ("群" + groupId + " " + who) : "主人", text)
     try { await ensureAgentForBucket(seg.id) } catch {}
     const fresh = Boolean(diag.freshSession)
     diag.freshSession = false
@@ -319,6 +322,7 @@ export function apply(ctx, rawConfig) {
       }
       fresh = true
       newDay = true
+      try { backupSessions("rollover") } catch {}
     } else if (cur.lastDay !== day) {
       newDay = true
     }
@@ -568,6 +572,7 @@ export function apply(ctx, rawConfig) {
       }
       await request(action, params)
       quota.mark(chatKey)
+      appendTranscript("蓝余汐", args.text)
       return `已发送到 ${chatKey}`
     },
   })
@@ -594,6 +599,76 @@ export function apply(ctx, rawConfig) {
       }, null, 2)
     },
   })
+
+  // —— 纯文本对话记录：给人看、给以后做 RAG 用 ——
+  function transcriptPath(d = new Date()) {
+    return join(config.sessionCwd || process.cwd(), "transcript", d.getFullYear() + "-" + z2(d.getMonth() + 1), z2(d.getDate()) + ".md")
+  }
+  function appendTranscript(who, text) {
+    try {
+      const p = transcriptPath()
+      mkdirSync(dirname(p), { recursive: true })
+      const d = new Date()
+      const line = "- " + z2(d.getHours()) + ":" + z2(d.getMinutes()) + " **" + who + "**：" + String(text).replace(/\s+/g, " ").slice(0, 500)
+      appendFileSync(p, line + "\n", "utf8")
+    } catch (error) {
+      diag.transcriptError = String(error)
+    }
+  }
+
+  // —— 会话备份：她的记忆只在 DSH 的 sessions 目录里，丢了就真丢了 ——
+  function sessionsRoot() {
+    return join(homedir(), ".dsh", "sessions", "--E-dsh-foundry-lanyuxi-msg--")
+  }
+  function backupRoot() {
+    return join(config.sessionCwd || process.cwd(), "backup")
+  }
+  function backupSessions(reason = "auto") {
+    try {
+      const src = sessionsRoot()
+      if (!existsSync(src)) return { ok: false, error: "还没产生会话日志" }
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)
+      const dir = join(backupRoot(), stamp)
+      mkdirSync(dir, { recursive: true })
+      let copied = 0
+      const stack = [[src, dir]]
+      while (stack.length) {
+        const [from, to] = stack.pop()
+        for (const entry of readdirSync(from, { withFileTypes: true })) {
+          const childFrom = join(from, entry.name)
+          const childTo = join(to, entry.name)
+          if (entry.isDirectory()) {
+            mkdirSync(childTo, { recursive: true })
+            stack.push([childFrom, childTo])
+          } else {
+            copyFileSync(childFrom, childTo)
+            copied += 1
+          }
+        }
+      }
+      for (const extra of [sessionStatePath(), settingsPath()]) {
+        try { if (existsSync(extra)) copyFileSync(extra, join(dir, basename(extra))) } catch {}
+      }
+      // 只保留最近 14 份
+      const all = readdirSync(backupRoot()).sort()
+      while (all.length > 14) {
+        const old = all.shift()
+        try {
+          for (const n of readdirSync(join(backupRoot(), old))) {
+            try { unlinkSync(join(backupRoot(), old, n)) } catch {}
+          }
+          rmdirSync(join(backupRoot(), old))
+        } catch {}
+      }
+      diag.lastBackup = { at: Date.now(), dir, copied, reason }
+      logger.info?.("[lanyuxi] 会话已备份 " + copied + " 个文件 -> " + dir)
+      return { ok: true, dir, copied }
+    } catch (error) {
+      diag.backupError = String(error)
+      logger.warn?.("[lanyuxi] 备份失败: " + String(error))
+      return { ok: false, error: String(error) }
+    }
+  }
 
   const outbox = []
   function drainOutbox() {
@@ -709,6 +784,15 @@ export function apply(ctx, rawConfig) {
             return send(500, { ok: false, via: diag.via, error: String(error), lastError: diag.lastError })
           }
         }
+        if (url.pathname === "/lanyuxi/backup") {
+          if (req.method === "POST") {
+            const r = backupSessions("manual")
+            return send(r.ok ? 200 : 500, r)
+          }
+          const root = backupRoot()
+          const list = existsSync(root) ? readdirSync(root).sort().reverse().slice(0, 10) : []
+          return send(200, { root, backups: list, lastBackup: diag.lastBackup || null, error: diag.backupError || "" })
+        }
         if (url.pathname === "/lanyuxi/settings") {
           if (req.method === "POST") {
             const q = Number(url.searchParams.get("rolloverPercent"))
@@ -783,6 +867,11 @@ export function apply(ctx, rawConfig) {
       return dispose
     }, "lanyuxi: 面板接口")
   })
+
+  ctx.effect(() => {
+    const backupTimer = setInterval(() => backupSessions("scheduled"), 6 * 60 * 60 * 1000)
+    return () => clearInterval(backupTimer)
+  }, "lanyuxi: 会话备份")
 
   ctx.effect(() => {
     const queueTimer = setInterval(drainOutbox, 2000)
