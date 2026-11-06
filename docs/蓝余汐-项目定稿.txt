@@ -70,7 +70,8 @@ QQ 小号（先做）→ B站小号（第二）→ 微信小号（最后，最�
    插件在「每次换段」时备份；另外按设置的间隔（默认 24 小时=每天一次，面板可改 1~72）检查，
    并可在面板一键关闭自动备份（关闭后只剩换段备份与手动备份）；检查时**只有最近 12 小时有聊天、且会话确实有新写入**
    才备份（长时间没人聊天就不产生新备份，避免无意义堆积）；统一存到 lanyuxi-msg\backup\<时间戳>\，只留最近 14 份；
-   手动触发：面板「立即备份」按钮，或 GET/POST /lanyuxi/backup。恢复办法：把备份目录放回 sessions 下的同名目录，重启 DSH。
+   手动触发：面板「立即备份」按钮，或 GET/POST /lanyuxi/backup；面板另有「打开备份文件夹」，
+   走受限接口 GET /lanyuxi/open?target=backup（只允许 backup/transcript/home/persona/diary/stickers/images 这几个白名单目录）。恢复办法：把备份目录放回 sessions 下的同名目录，重启 DSH。
  文本记录：每条收到、每条发出的消息追加一行到 lanyuxi-msg\transcript\<年-月>\<日>.md
    （形如「- 10:53 **主人**：活了没」）。人可读、可 grep、可整目录打包。
  以后可做（现阶段不做）：把 transcript 切块入向量库做 RAG，让她能按语义回忆很久以前的事；
