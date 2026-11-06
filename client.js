@@ -343,6 +343,78 @@ window.__ModuleLoader__.load({
       }, [tab]);
 
       React.useEffect(function () {
+        if (tab !== 'platforms') return;
+        const root = document.querySelector('.lyx-scope #view-platforms');
+        if (!root) return;
+        let dead = false;
+        const cards = Array.prototype.slice.call(root.querySelectorAll('.card'));
+        const biliPill = root.querySelector('#st-bili');
+        const biliCard = biliPill ? biliPill.closest('.card') : cards[1];
+        if (!biliCard) return;
+        function paint(d) {
+          if (dead || !d) return;
+          const pill = biliCard.querySelector('#st-bili');
+          if (pill) {
+            pill.className = 'pill ' + (d.loggedIn ? 'ok' : 'off');
+            pill.textContent = d.loggedIn ? '已登录' : '未接入';
+          }
+          const nm = biliCard.querySelector('.nm');
+          const acc = biliCard.querySelector('.nm .acc');
+          const sub = biliCard.querySelector('.sub');
+          const pav = biliCard.querySelector('.pav');
+          if (d.loggedIn && d.profile) {
+            if (nm) {
+              const first = Array.prototype.slice.call(nm.childNodes).filter(function (n) { return n.nodeType === 3; })[0];
+              if (first) first.textContent = d.profile.name + ' ';
+            }
+            if (acc) acc.textContent = 'UID ' + d.profile.uid;
+            if (sub) sub.textContent = 'Lv' + (d.profile.level || 0) + ' · Cookie 登录';
+            if (pav && d.profile.avatar) {
+              const original = pav.innerHTML;
+              const badge = pav.querySelector('.pbadge');
+              pav.innerHTML = '';
+              const img = document.createElement('img');
+              img.src = d.profile.avatar + '@80w_80h';
+              img.referrerPolicy = 'no-referrer';
+              img.style.cssText = 'width:100%;height:100%;border-radius:10px;object-fit:cover;display:block';
+              img.onerror = function () { pav.innerHTML = original; };
+              pav.appendChild(img);
+              if (badge) pav.appendChild(badge);
+            }
+          } else if (sub) {
+            sub.textContent = d.hasCookie ? 'Cookie 已保存，但校验没过（可能过期）' : '未接入：粘贴 Cookie 就能用';
+          }
+          const btns = Array.prototype.slice.call(biliCard.querySelectorAll('button'));
+          btns.forEach(function (b) {
+            if (b.textContent.indexOf('扫码') >= 0 || b.textContent.indexOf('绑定') >= 0) {
+              b.textContent = d.loggedIn ? '退出登录' : '粘贴 Cookie 登录';
+              b.onclick = function () {
+                if (d.loggedIn) {
+                  fetch('/lanyuxi/bili', { method: 'DELETE' }).then(function (r) { return r.json(); }).then(function (x) { paint({ loggedIn: false, profile: null }); lyxToast('已退出 B 站'); }).catch(function () {});
+                  return;
+                }
+                const cookie = window.prompt('粘贴 B 站 Cookie（至少包含 SESSDATA=...）');
+                if (!cookie) return;
+                b.disabled = true;
+                b.textContent = '校验中…';
+                fetch('/lanyuxi/bili', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cookie: cookie }) })
+                  .then(function (r) { return r.json(); })
+                  .then(function (x) {
+                    b.disabled = false;
+                    if (x && x.ok && x.loggedIn) { paint(x); lyxToast('登录成功：' + x.profile.name); }
+                    else { paint({ loggedIn: false, profile: null, hasCookie: true }); lyxToast('Cookie 校验没过，看看是不是过期了'); }
+                    b.textContent = x && x.ok && x.loggedIn ? '退出登录' : '粘贴 Cookie 登录';
+                  })
+                  .catch(function () { b.disabled = false; b.textContent = '粘贴 Cookie 登录'; lyxToast('接口不可用'); });
+              };
+            }
+          });
+        }
+        fetch('/lanyuxi/bili', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(paint).catch(function () {});
+        return function () { dead = true; };
+      }, [tab]);
+
+      React.useEffect(function () {
         if (tab !== 'assets') return;
         const root = document.querySelector('.lyx-scope #view-assets');
         if (!root) return;

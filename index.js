@@ -1118,6 +1118,30 @@ export function apply(ctx, rawConfig) {
     wonder.repliedAt = Date.now()
     saveWonder()
   }
+  // —— B 站：Cookie 登录与身份校验（扫码后续再补） ——
+  const biliPath = () => join(config.sessionCwd || process.cwd(), ".lanyuxi-bili.json")
+  const bili = { cookie: "", profile: null, checkedAt: 0 }
+  try {
+    if (existsSync(biliPath())) Object.assign(bili, JSON.parse(readFileSync(biliPath(), "utf8")))
+  } catch {}
+  function saveBili() {
+    try { writeFileSync(biliPath(), JSON.stringify(bili, null, 2), "utf8") } catch (error) { diag.biliError = String(error) }
+  }
+  async function biliNav() {
+    if (!bili.cookie) return null
+    try {
+      const res = await fetch("https://api.bilibili.com/x/web-interface/nav", {
+        headers: { "User-Agent": "Mozilla/5.0", Cookie: bili.cookie, Referer: "https://www.bilibili.com/" },
+      })
+      const json = await res.json()
+      if (!json || json.code !== 0 || !json.data || !json.data.isLogin) return null
+      return { name: json.data.uname, uid: json.data.mid, avatar: json.data.face, level: json.data.level_info?.current_level ?? 0 }
+    } catch (error) {
+      diag.biliError = String(error)
+      return null
+    }
+  }
+
   const outbox = []
   function drainOutbox() {
     if (!outbox.length || !connected) return
@@ -1269,7 +1293,39 @@ export function apply(ctx, rawConfig) {
             return send(500, { ok: false, error: String(error) })
           }
         }
-        if (url.pathname === "/lanyuxi/assets") {
+        if (url.pathname === "/lanyuxi/bili") {
+          if (req.method === "POST") {
+            let body = ""
+            req.on("data", (chunk) => { body += chunk })
+            req.on("end", async () => {
+              try {
+                const payload = body ? JSON.parse(body) : {}
+                if (typeof payload.cookie === "string") {
+                  bili.cookie = payload.cookie.trim()
+                  bili.profile = await biliNav()
+                  bili.checkedAt = Date.now()
+                  saveBili()
+                }
+                send(200, { ok: true, loggedIn: Boolean(bili.profile), profile: bili.profile, checkedAt: bili.checkedAt })
+              } catch (error) {
+                send(500, { ok: false, error: String(error) })
+              }
+            })
+            return
+          }
+          if (req.method === "DELETE") {
+            bili.cookie = ""
+            bili.profile = null
+            saveBili()
+            return send(200, { ok: true, loggedIn: false })
+          }
+          if (!bili.profile && bili.cookie && Date.now() - bili.checkedAt > 10 * 60 * 1000) {
+            bili.profile = await biliNav()
+            bili.checkedAt = Date.now()
+            saveBili()
+          }
+          return send(200, { loggedIn: Boolean(bili.profile), profile: bili.profile, hasCookie: Boolean(bili.cookie), checkedAt: bili.checkedAt })
+        }        if (url.pathname === "/lanyuxi/assets") {
           const home = config.homeDir || "E:\\dsh-foundry\\lanyuxi-home"
           const listDir = (dir) => {
             try {
