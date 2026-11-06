@@ -19,3 +19,7 @@
         cooldownMs: 300000
         maxOutboundPerDay: 20
         groupOutboundPerDay: 10
+        # 语音（M4）：装好 GPT-SoVITS 后把 voiceEnabled 改 true，API 默认 http://127.0.0.1:9880
+        voiceEnabled: false
+        gptSovitsApi: http://127.0.0.1:9880
+        gptSovitsDir: E:\GPT-SoVITS

@@ -9,7 +9,7 @@ import { readFileSync, existsSync, mkdirSync, writeFileSync, statSync, unlinkSyn
 import { join, basename, dirname } from "node:path"
 import { homedir } from "node:os"
 import { readdirSync, copyFileSync, appendFileSync } from "node:fs"
-import { randomUUID } from "node:crypto"
+import { randomUUID, createHash } from "node:crypto"
 import { spawn, spawnSync } from "node:child_process"
 
 export const name = "lanyuxi"
@@ -24,6 +24,9 @@ const DEFAULTS = {
   cooldownMs: 300000,
   privateCooldownMs: 5000,
   groupOutboundPerDay: 10,
+  gptSovitsDir: "E:\\GPT-SoVITS",
+  gptSovitsApi: "http://127.0.0.1:9880",
+  voiceEnabled: false,
   rolloverPercent: 50,
   contextWindowTokens: 1048576,
   charsPerToken: 1,
@@ -804,6 +807,8 @@ export function apply(ctx, rawConfig) {
       properties: {
         text: { type: "string", description: "要说的话。只发图时可以不给。" },
         image: { type: "string", description: "要发的图片/表情的本地绝对路径（必须在 lanyuxi-home 下，比如 stickers\\coy\\xxx.gif）。" },
+        voice: { type: "string", description: "要说的话，会合成成她的语音发出去（引擎没装好会失败，那就改用 text 发文字）。" },
+        emotion: { type: "string", enum: ["日常", "撒娇"], description: "voice 的情绪档；默认日常。" },
         target_type: { type: "string", enum: ["group", "private"], description: "发给群还是私聊；默认沿用最近一次收到消息的聊天。" },
         target_id: { type: "string", description: "群号或 QQ 号；默认沿用最近一次收到消息的聊天。" },
       },
@@ -816,7 +821,11 @@ export function apply(ctx, rawConfig) {
     async execute(args) {
       const hasText = typeof args?.text === "string" && args.text.trim() !== ""
       const hasImage = typeof args?.image === "string" && args.image.trim() !== ""
-      if (!hasText && !hasImage) throw new Error("text 和 image 至少给一个")
+      let voiceFile = ""
+      if (typeof args?.voice === "string" && args.voice.trim() !== "") {
+        voiceFile = await synthesize(args.voice.trim(), args.emotion || "日常")
+      }
+      if (!hasText && !hasImage && !voiceFile) throw new Error("text / image / voice 至少给一个")
       if (hasImage) {
         const imgPath = String(args.image).trim()
         const home = String(config.homeDir || "E:\\dsh-foundry\\lanyuxi-home").toLowerCase()
@@ -848,6 +857,7 @@ export function apply(ctx, rawConfig) {
       const parts = []
       if (hasText) parts.push({ type: "text", data: { text: args.text } })
       if (hasImage) parts.push({ type: "image", data: { file: "file:///" + String(args.image).trim().replace(/\\/g, "/") } })
+      if (voiceFile) parts.push({ type: "record", data: { file: "file:///" + voiceFile.replace(/\\/g, "/") } })
       const params = type === "group" ? { group_id: Number(id), message: parts } : { user_id: Number(id), message: parts }
       const blocked = quota.check(chatKey)
       if (blocked && blocked.indexOf("冷却") < 0 && blocked.indexOf("刚在") < 0) {
@@ -1126,6 +1136,29 @@ export function apply(ctx, rawConfig) {
     wonder.repliedAt = Date.now()
     saveWonder()
   }
+  // —— 语音：调本地 GPT-SoVITS 合成，短句缓存 ——
+  async function synthesize(text, emotion = "日常") {
+    const api = config.gptSovitsApi || "http://127.0.0.1:9880"
+    const home = config.homeDir || "E:\\dsh-foundry\\lanyuxi-home"
+    const cacheDir = join(home, "voice", "cache")
+    mkdirSync(cacheDir, { recursive: true })
+    const key = createHash("md5").update(emotion + "|" + text).digest("hex").slice(0, 16)
+    const out = join(cacheDir, key + ".wav")
+    if (existsSync(out)) return out
+    const ref = config.gptSovitsRef || join(home, "voice", "ref.wav")
+    if (!existsSync(ref)) throw new Error("还没有参考音频：" + ref + "（放一段主人的声音进去）")
+    const url = api.replace(/\/$/, "") + "/tts?text=" + encodeURIComponent(text) +
+      "&text_lang=zh&ref_audio_path=" + encodeURIComponent(ref) +
+      "&prompt_lang=zh&prompt_text=" + encodeURIComponent(config.gptSovitsPrompt || "") +
+      "&emotion=" + encodeURIComponent(emotion) + "&media_type=wav"
+    const res = await fetch(url)
+    if (!res.ok) throw new Error("语音合成失败 HTTP " + res.status)
+    const buf = Buffer.from(await res.arrayBuffer())
+    if (buf.length < 1000) throw new Error("合成结果太小，引擎可能没就绪")
+    writeFileSync(out, buf)
+    return out
+  }
+
   // —— B 站：Cookie 登录与身份校验（扫码后续再补） ——
   const biliPath = () => join(config.sessionCwd || process.cwd(), ".lanyuxi-bili.json")
   const bili = { cookie: "", profile: null, checkedAt: 0 }
