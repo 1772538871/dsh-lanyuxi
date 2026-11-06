@@ -415,6 +415,49 @@ window.__ModuleLoader__.load({
       }, [tab]);
 
       React.useEffect(function () {
+        if (tab !== 'voice') return;
+        const root = document.querySelector('.lyx-scope #view-voice');
+        if (!root) return;
+        let dead = false;
+        fetch('/lanyuxi/voice', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) {
+          if (dead || !d) return;
+          const cards = Array.prototype.slice.call(root.querySelectorAll('.card'));
+          function cardBy(kw) {
+            return cards.filter(function (c) { const h = c.querySelector('h3'); return h && h.textContent.indexOf(kw) >= 0; })[0];
+          }
+          function setTag(card, text, tone) {
+            if (!card) return;
+            const tag = card.querySelector('.tag, .pill');
+            if (tag) { tag.textContent = text; tag.className = (tag.className.indexOf('pill') >= 0 ? 'pill ' : 'tag ') + (tone || ''); }
+          }
+          const engineCard = cards[0];
+          if (engineCard) {
+            const tags = engineCard.querySelectorAll('.tag, .pill');
+            const list = Array.prototype.slice.call(tags);
+            if (list[0]) { list[0].textContent = d.engine.installed ? '已就位' : '未安装'; list[0].className = list[0].className.replace(/\b(ok|off|warn)\b/g, '').trim() + ' ' + (d.engine.installed ? 'green' : ''); }
+            if (list[1]) { list[1].textContent = d.ffmpeg ? 'ffmpeg ✓' : 'ffmpeg ✗'; list[1].className = list[1].className.replace(/\b(ok|off|warn)\b/g, '').trim() + ' ' + (d.ffmpeg ? 'green' : 'pink'); }
+          }
+          Array.prototype.slice.call(root.querySelectorAll('.k, div')).forEach(function (el) {});
+          const ttsCard = cardBy('试听') || cardBy('语音');
+          if (ttsCard) {
+            const inputs = ttsCard.querySelectorAll('input[type=text], textarea');
+            Array.prototype.forEach.call(inputs, function (inp) {
+              if (!inp.getAttribute('data-wired')) {
+                inp.setAttribute('data-wired', '1');
+                inp.placeholder = d.enabled ? inp.placeholder : '语音引擎还没接通（M4 进行中）';
+              }
+            });
+            Array.prototype.slice.call(ttsCard.querySelectorAll('button')).forEach(function (b) {
+              if (b.textContent.indexOf('试听') >= 0 || b.textContent.indexOf('合成') >= 0) {
+                b.onclick = function () { lyxToast(d.enabled ? '语音合成还没接（下一步做）' : '语音引擎未启用：' + (d.engine.installed ? '已装但未启用' : '还没装 GPT-SoVITS')); };
+              }
+            });
+          }
+        }).catch(function () {});
+        return function () { dead = true; };
+      }, [tab]);
+
+      React.useEffect(function () {
         if (tab !== 'assets') return;
         const root = document.querySelector('.lyx-scope #view-assets');
         if (!root) return;

@@ -833,7 +833,7 @@ export function apply(ctx, rawConfig) {
       const chatKey = type === "group" ? `group:${id}` : `private:${id}`
       if (muted()) throw new Error("现在是静音时间，她一句话都不会说（面板可以取消静音）")
       if (brakes.socialPaused && type === "group") throw new Error("社交已暂停，她不在群里说话（私聊照常）")
-      const hit = guardCheck(hasText ? args.text : "")
+      const hit = type === "group" ? guardCheck(hasText ? args.text : "") : ""
       if (hit) {
         diag.guardBlocked = (diag.guardBlocked || 0) + 1
         diag.guardLast = hit
@@ -1333,7 +1333,24 @@ export function apply(ctx, rawConfig) {
             saveBili()
           }
           return send(200, { loggedIn: Boolean(bili.profile), profile: bili.profile, hasCookie: Boolean(bili.cookie), checkedAt: bili.checkedAt })
-        }        if (url.pathname === "/lanyuxi/assets") {
+        }        if (url.pathname === "/lanyuxi/voice") {
+          const home = config.homeDir || "E:\\dsh-foundry\\lanyuxi-home"
+          const engineDir = config.gptSovitsDir || "E:\\GPT-SoVITS"
+          const countFiles = (dir) => {
+            try { return existsSync(dir) ? readdirSync(dir).length : 0 } catch { return 0 }
+          }
+          let ffmpegOk = false
+          try { ffmpegOk = spawnSync(config.ffmpegPath || "ffmpeg", ["-version"], { windowsHide: true, timeout: 5000 }).status === 0 } catch {}
+          return send(200, {
+            engine: { dir: engineDir, installed: existsSync(engineDir) },
+            ffmpeg: ffmpegOk,
+            samples: countFiles(join(home, "voice")),
+            cache: countFiles(join(home, "voice", "cache")),
+            enabled: Boolean(config.voiceEnabled),
+            emotionTiers: ["日常", "撒娇"],
+          })
+        }
+        if (url.pathname === "/lanyuxi/assets") {
           const home = config.homeDir || "E:\\dsh-foundry\\lanyuxi-home"
           const listDir = (dir) => {
             try {
