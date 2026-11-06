@@ -165,8 +165,37 @@ export function apply(ctx, rawConfig) {
     const userId = String(event.user_id ?? "")
     const segments = Array.isArray(event.message) ? event.message : []
     const atMe = segments.some((s) => s?.type === "at" && String(s?.data?.qq) === selfId)
-    const text = segments.filter((s) => s?.type === "text").map((s) => s?.data?.text ?? "").join("").trim()
-      || (typeof event.raw_message === "string" ? event.raw_message.trim() : "")
+    let text = segments.filter((s) => s?.type === "text").map((s) => s?.data?.text ?? "").join("").trim()
+    if (!text && typeof event.raw_message === "string") text = event.raw_message.trim()
+    // 图片：下载到她的图片库，再把本地路径告诉她，她可以用 read_image 看
+    const imageSegs = segments.filter((s) => s?.type === "image")
+    if (imageSegs.length) {
+      const saved = []
+      for (const seg of imageSegs.slice(0, 4)) {
+        const url = seg?.data?.url || seg?.data?.file_url || ""
+        const fileName = String(seg?.data?.file || "image").slice(0, 40).replace(/[^\w.\-]/g, "_")
+        try {
+          if (!url) continue
+          const res = await fetch(url)
+          if (!res.ok) continue
+          const buf = Buffer.from(await res.arrayBuffer())
+          const now = new Date()
+          const month = now.getFullYear() + "-" + z2(now.getMonth() + 1)
+          const dir = join(config.homeDir || "E:\\dsh-foundry\\lanyuxi-home", "images", month)
+          mkdirSync(dir, { recursive: true })
+          const out = join(dir, Date.now() + "-" + fileName.replace(/\.(jpg|jpeg|png|gif|webp)$/i, "") + (String(url).match(/\.(jpg|jpeg|png|gif|webp)/i) || [".jpg"])[0])
+          writeFileSync(out, buf)
+          saved.push(out)
+        } catch (error) {
+          diag.imageError = String(error)
+        }
+      }
+      if (saved.length) {
+        text = (text ? text + "\n" : "") + "（对方发了 " + saved.length + " 张图，已存到：" + saved.join("、") + "。想看清楚就用 read_image 打开它。）"
+      } else {
+        text = (text ? text + "\n" : "") + "（对方发了一张图，但没下载下来，你只看到一条图片提示。）"
+      }
+    }
     if (!text) { diag.droppedEmpty += 1; return }
 
     if (messageType === "group") {
