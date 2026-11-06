@@ -45,8 +45,8 @@ window.__ModuleLoader__.load({
 .lyx-scope .lyx-rail .ic{display:inline-flex;width:16px;height:16px;flex:0 0 auto}
 .lyx-scope .lyx-rail .ic svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 .lyx-scope .lyx-main{min-width:0}
-.lyx-scope .legend{display:flex;flex-wrap:wrap;gap:6px 12px}
-.lyx-scope .legend .lg{flex:1 1 46%;min-width:0;white-space:normal;line-height:1.4;font-size:12px}
+.lyx-scope .legend{display:flex;flex-wrap:wrap;justify-content:center;gap:6px 12px;max-width:560px;margin:0 auto}
+.lyx-scope .legend .lg{flex:0 1 46%;min-width:0;white-space:normal;line-height:1.4;font-size:12px;justify-content:flex-start}
 .lyx-scope .lyx-rail .navbtn.on{border-color:rgba(91,140,255,.45)}
 .lyx-scope .lyx-main .card{padding:13px 14px}
 .lyx-scope .lyx-main .sub,.lyx-scope .lyx-main .meta{min-width:0;white-space:normal;word-break:break-word}
