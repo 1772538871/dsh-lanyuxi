@@ -178,7 +178,7 @@ export function apply(ctx, rawConfig) {
       raw: String(event.raw_message || "").slice(0, 80),
     }
     let text = segments.filter((s) => s?.type === "text").map((s) => s?.data?.text ?? "").join("").trim()
-    if (!text && typeof event.raw_message === "string") text = event.raw_message.trim()
+    if (!text && typeof event.raw_message === "string") text = event.raw_message.replace(/\[CQ:[^\]]*\]/g, "").trim()
     if (!text) { diag.droppedEmpty += 1; return }
 
     if (messageType === "group") {
@@ -642,9 +642,13 @@ export function apply(ctx, rawConfig) {
     if (!cur.titleBase) cur.titleBase = String(sample).replace(/\s+/g, " ").trim().slice(0, 12) || "聊天"
     const signature = cur.id + "|" + cur.lastDay
     if (titledSignature === signature) return
-    const from = md(dayOf(cur.firstDay))
-    const to = md(dayOf(cur.lastDay))
-    const title = cur.titleBase + "—" + (from === to ? from : (from + "到" + to))
+    const fmt = (stamp) => {
+      const d = dayOf(stamp)
+      return String(d.getFullYear()).slice(2) + "年" + (d.getMonth() + 1) + "月" + d.getDate() + "号"
+    }
+    const from = fmt(cur.firstDay)
+    const to = fmt(cur.lastDay)
+    const title = (cur.titleBase || "聊天") + "_" + (from === to ? from : (from + "-" + to))
     try {
       const st = ctx.get("sessionTitle")
       const agents = ctx.get("agents")
