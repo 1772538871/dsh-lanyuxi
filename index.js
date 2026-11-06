@@ -29,6 +29,9 @@ const DEFAULTS = {
   charsPerToken: 1,
   maxOutboundPerDay: 20,
   maxProactivePerDay: 3,
+  proactiveMinIdleHours: 4,
+  proactiveWindowStart: 9,
+  proactiveWindowEnd: 22,
   napcatPanel: "http://127.0.0.1:6100",
 }
 
@@ -1045,6 +1048,46 @@ export function apply(ctx, rawConfig) {
     },
   })
 
+  // —— 主动找主人：闲着太久才给一次机会，一天不超过配置上限 ——
+  const proactivePath = () => join(config.sessionCwd || process.cwd(), ".lanyuxi-proactive.json")
+  const proactive = { day: "", count: 0, lastNudgeAt: 0 }
+  try {
+    if (existsSync(proactivePath())) Object.assign(proactive, JSON.parse(readFileSync(proactivePath(), "utf8")))
+  } catch {}
+  function saveProactive() {
+    try { writeFileSync(proactivePath(), JSON.stringify(proactive, null, 2), "utf8") } catch (error) { diag.proactiveError = String(error) }
+  }
+  async function maybeNudge() {
+    try {
+      if (!connected || muted()) return
+      const now = new Date()
+      const hour = now.getHours()
+      if (hour < Number(config.proactiveWindowStart ?? 9) || hour > Number(config.proactiveWindowEnd ?? 22)) return
+      if (!lastActivityAt) return
+      const idleMs = Date.now() - lastActivityAt
+      if (idleMs < Number(config.proactiveMinIdleHours ?? 4) * 3600000) return
+      if (Date.now() - Number(proactive.lastNudgeAt || 0) < 3 * 3600000) return
+      const today = ymd(now)
+      if (proactive.day !== today) { proactive.day = today; proactive.count = 0 }
+      const limit = Number(config.maxProactivePerDay ?? 3)
+      if (proactive.count >= limit) return
+      proactive.count += 1
+      proactive.lastNudgeAt = Date.now()
+      saveProactive()
+      const seg = segmentInfo(0)
+      await deliver(
+        [
+          `【可以主动找他了】${stampNow()}。你上一句话之后他已经 ${Math.round(idleMs / 3600000)} 小时没来找你了。`,
+          `如果你这会儿确实有想跟他说的话（看到好玩的、想问他一句、或者就是有点想），就用 qq_send 发给 ${ownerLabel()}（target_type=private，target_id=${config.ownerQq}）。`,
+          `没有想说的就别发——硬找话题比不说话更尴尬。今天你已经用掉 ${proactive.count}/${limit} 次主动机会。`,
+        ].join("\n"),
+        seg.id,
+      )
+    } catch (error) {
+      diag.proactiveError = String(error)
+    }
+  }
+
   const outbox = []
   function drainOutbox() {
     if (!outbox.length || !connected) return
@@ -1437,6 +1480,11 @@ export function apply(ctx, rawConfig) {
     }, 60 * 1000)
     return () => clearInterval(backupTimer)
   }, "lanyuxi: 会话备份")
+
+  ctx.effect(() => {
+    const nudgeTimer = setInterval(maybeNudge, 20 * 60 * 1000)
+    return () => clearInterval(nudgeTimer)
+  }, "lanyuxi: 主动消息")
 
   ctx.effect(() => {
     const queueTimer = setInterval(drainOutbox, 2000)
