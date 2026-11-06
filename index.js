@@ -245,7 +245,18 @@ export function apply(ctx, rawConfig) {
     let agent = agents.get(key)
     if (agent) { diag.freshSession = false; return agent }
     try {
-      const handle = await agents.create({ sessionId: key, meta: { cwd: config.sessionCwd || process.cwd() } })
+      let selection
+      try {
+        const defaultModel = ctx.get("agentDefaultModel")
+        if (defaultModel && typeof defaultModel.currentSelection === "function") selection = defaultModel.currentSelection()
+      } catch (selectionError) {
+        diag.modelError = String(selectionError)
+      }
+      const agentOptions = selection
+        ? { provider: selection.provider, model: selection.model }
+        : undefined
+      diag.model = selection ? selection.provider + "/" + selection.model : "(默认)"
+      const handle = await agents.create({ sessionId: key, meta: { cwd: config.sessionCwd || process.cwd() }, agentOptions })
       agent = handle.agent
       agentHandle = handle
       diag.via = "create:" + key
