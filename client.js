@@ -799,6 +799,16 @@ window.__ModuleLoader__.load({
           },
         }, roll.backupEnabled ? '自动备份：开' : '自动备份：关'),
         h('button', {
+          className: 'btn ghost',
+          style: { padding: '4px 10px', fontSize: 12 },
+          title: '在资源管理器里打开备份文件夹',
+          onClick: function () {
+            fetch('/lanyuxi/open?target=backup').then(function (r) { return r.json(); }).then(function (d) {
+              lyxToast(d && d.ok ? ('已打开：' + d.dir) : ('打不开：' + ((d && d.error) || '未知')));
+            }).catch(function () { lyxToast('接口不可用'); });
+          },
+        }, '打开备份文件夹'),
+        h('button', {
           className: 'btn',
           style: { marginLeft: 'auto', padding: '5px 14px', fontSize: 12, fontWeight: 600, color: '#fff', background: 'linear-gradient(140deg,#3f6fe0,#5b8cff)', border: '1px solid rgba(91,140,255,.6)', borderRadius: 8, cursor: 'pointer' },
           onClick: function () {

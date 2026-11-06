@@ -1465,6 +1465,28 @@ export function apply(ctx, rawConfig) {
           }
           return send(200, { card: readPersonaFile("人格卡.md"), fixes: fixList(), aliases: ownerAliases(), banned: guardTerms() })
         }
+        if (url.pathname === "/lanyuxi/open") {
+          const target = url.searchParams.get("target") || ""
+          const home = config.homeDir || "E:\\dsh-foundry\\lanyuxi-home"
+          const map = {
+            backup: join(config.sessionCwd || process.cwd(), "backup"),
+            transcript: join(config.sessionCwd || process.cwd(), "transcript"),
+            home,
+            persona: join(home, "persona"),
+            diary: join(home, "diary"),
+            stickers: join(home, "stickers"),
+            images: join(home, "images"),
+          }
+          const dir = map[target]
+          if (!dir) return send(400, { ok: false, error: "不认识的目录" })
+          try {
+            mkdirSync(dir, { recursive: true })
+            spawn("explorer.exe", [dir], { detached: true, stdio: "ignore", windowsHide: false }).unref()
+            return send(200, { ok: true, dir })
+          } catch (error) {
+            return send(500, { ok: false, error: String(error), dir })
+          }
+        }
         if (url.pathname === "/lanyuxi/backup") {
           if (req.method === "POST") {
             const r = backupSessions("manual")
