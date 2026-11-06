@@ -189,30 +189,6 @@ export function apply(ctx, rawConfig) {
       : ownerLabel()
     if (muted()) { diag.mutedSkip = (diag.mutedSkip || 0) + 1; return }
     if (brakes.socialPaused && messageType === "group") { diag.socialSkip = (diag.socialSkip || 0) + 1; return }
-    // —— 天气：配了城市就查真实天气，没配就让她按季节写个合理的 ——
-    async function todayWeather() {
-      const city = config.weatherCity
-      if (!city) return ""
-      try {
-        const geo = await fetch("https://geocoding-api.open-meteo.com/v1/search?count=1&language=zh&name=" + encodeURIComponent(city))
-        const gj = await geo.json()
-        const spot = gj && gj.results && gj.results[0]
-        if (!spot) return ""
-        const url = "https://api.open-meteo.com/v1/forecast?current=temperature_2m,weather_code&timezone=auto&latitude=" + spot.latitude + "&longitude=" + spot.longitude
-        const res = await fetch(url)
-        const wj = await res.json()
-        const cur = wj && wj.current
-        if (!cur) return ""
-        const map = { 0: "晴", 1: "晴", 2: "多云", 3: "阴", 45: "雾", 48: "雾", 51: "小雨", 53: "小雨", 55: "雨", 61: "小雨", 63: "雨", 65: "大雨", 71: "雪", 73: "雪", 75: "大雪", 80: "阵雨", 81: "阵雨", 82: "暴雨", 95: "雷阵雨", 96: "雷阵雨", 99: "雷阵雨" }
-        const label = map[cur.weather_code] || "多云"
-        const c = cur.temperature_2m
-        const feel = c >= 32 ? "热得慌" : c >= 28 ? "有点热" : c >= 24 ? "不冷不热" : c >= 18 ? "凉快" : c >= 10 ? "有点冷" : c >= 0 ? "冷" : "冷得受不了"
-        return label + "，" + feel
-      } catch {
-        return ""
-      }
-    }
-
     // —— 每日日记：新的一天第一次说话时，让她把昨天写下来 ——
     const diaryKey = ymd(new Date())
     let diaryTask = ""
@@ -225,10 +201,9 @@ export function apply(ctx, rawConfig) {
         const month = d.getFullYear() + "-" + z2(d.getMonth() + 1)
         const dayName = diaryKey
         const base = config.homeDir || "E:\\dsh-foundry\\lanyuxi-home"
-        const w = await todayWeather()
         const now2 = new Date()
         const week = "日一二三四五六"[now2.getDay()]
-        const head = `${now2.getFullYear()}年${now2.getMonth() + 1}月${now2.getDate()}日 星期${week} 天气：${w || "（自己挑，写晴/多云/小雨 + 热/凉快/冷 这种）"} 心情：${"（自己写一个词）"}`
+        const head = `${now2.getFullYear()}年${now2.getMonth() + 1}月${now2.getDate()}日 星期${week} 天气：${"（自己写，晴/多云 + 热/凉快/冷）"} 心情：${"（自己写一个词）"}`
         diaryTask = [
           `【今天的第一件事】现在先写日记，写两篇，都写到 ${base}\\diary\\ 下：`,
           `1) 表日记：${base}\\diary\\to-owner\\${month}\\${dayName}.md —— 给主人看的小学生作文，200 字以内。`,
