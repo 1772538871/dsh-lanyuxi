@@ -377,13 +377,14 @@ window.__ModuleLoader__.load({
             }
             const pav = qqCard.querySelector('.pav');
             if (pav && d.selfId && d.connected) {
+              const original = pav.innerHTML;
               const badge = pav.querySelector('.pbadge');
               pav.innerHTML = '';
               const img = document.createElement('img');
               img.src = 'https://q1.qlogo.cn/g?b=qq&nk=' + d.selfId + '&s=640';
               img.alt = d.selfNickname || d.selfId;
               img.style.cssText = 'width:100%;height:100%;border-radius:10px;object-fit:cover;display:block';
-              img.onerror = function () { img.style.display = 'none'; };
+              img.onerror = function () { pav.innerHTML = original; };
               pav.appendChild(img);
               if (badge) pav.appendChild(badge);
             }
