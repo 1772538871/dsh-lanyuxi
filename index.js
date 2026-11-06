@@ -186,12 +186,22 @@ export function apply(ctx, rawConfig) {
           const out = join(dir, Date.now() + "-" + fileName.replace(/\.(jpg|jpeg|png|gif|webp)$/i, "") + (String(url).match(/\.(jpg|jpeg|png|gif|webp)/i) || [".jpg"])[0])
           writeFileSync(out, buf)
           saved.push(out)
+          const frames = extractGifFrames(out)
+          if (frames.length) saved.push("\u0000GIF\u0000" + frames.join("、"))
         } catch (error) {
           diag.imageError = String(error)
         }
       }
       if (saved.length) {
-        text = (text ? text + "\n" : "") + "（对方发了 " + saved.length + " 张图，已存到：" + saved.join("、") + "。想看清楚就用 read_image 打开它。）"
+        const plain = saved.filter((x) => x.indexOf("\u0000GIF\u0000") < 0)
+        const gifs = saved.filter((x) => x.indexOf("\u0000GIF\u0000") >= 0).map((x) => x.replace("\u0000GIF\u0000", ""))
+        const parts = []
+        if (plain.length) parts.push("（对方发了 " + plain.length + " 张图，已存到：" + plain.join("、") + "。想看清楚就用 read_image 打开它。）")
+        if (gifs.length) {
+          const frameList = gifs.join("、").split("、").filter(Boolean)
+          parts.push("（其中是动图，按每秒抽帧共 " + frameList.length + " 帧：\n" + frameList.join("\n") + "\n 逐帧 read_image 看，能看出它在动什么、想表达什么，别只看第一帧。）")
+        }
+        text = (text ? text + "\n" : "") + parts.join("\n")
       } else {
         text = (text ? text + "\n" : "") + "（对方发了一张图，但没下载下来，你只看到一条图片提示。）"
       }
@@ -872,6 +882,27 @@ export function apply(ctx, rawConfig) {
     try { writeFileSync(brakesPath(), JSON.stringify(brakes, null, 2), "utf8") } catch (error) { diag.brakesError = String(error) }
   }
   function muted() { return Date.now() < Number(brakes.muteUntil || 0) }
+
+  // —— 动图：抽几帧出来，她才能看到"动"的部分 ——
+  function extractGifFrames(file) {
+    try {
+      const head = readFileSync(file).subarray(0, 6).toString("latin1")
+      if (!head.startsWith("GIF")) return []
+      const ff = config.ffmpegPath || "ffmpeg"
+      const base = file.replace(/\.[^.]+$/, "")
+      const pattern = base + "-f%02d.png"
+      const run = (bin) => spawnSync(bin, ["-y", "-i", file, "-vf", "fps=2,scale=min(640\\,iw):-1", "-frames:v", "4", pattern], { windowsHide: true, timeout: 20000 })
+      let r = run(ff)
+      if (r.error && r.error.code === "ENOENT") r = run("C:\\Users\\admin\\AppData\\Local\\Microsoft\\WinGet\\Links\\ffmpeg.exe")
+      if (r.error) { diag.gifError = String(r.error); return [] }
+      const dir = dirname(file)
+      const prefix = basename(base) + "-f"
+      return readdirSync(dir).filter((n) => n.startsWith(prefix) && n.endsWith(".png")).sort().map((n) => join(dir, n))
+    } catch (error) {
+      diag.gifError = String(error)
+      return []
+    }
+  }
 
   // —— 纯文本对话记录：给人看、给以后做 RAG 用 ——
   function transcriptPath(d = new Date()) {
