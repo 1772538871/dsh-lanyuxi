@@ -84,13 +84,13 @@ window.__ModuleLoader__.load({
     function LanyuxiSettings() {
       const [tab, setTab] = React.useState('platforms');
       const [scan, setScan] = React.useState(null);
-      const [roll, setRoll] = React.useState({ percent: 50, used: 0, limit: 0, segment: 0 });
+      const [roll, setRoll] = React.useState({ percent: 50, backupHours: 6, used: 0, limit: 0, segment: 0 });
       React.useEffect(function () {
         let dead = false;
         function load() {
           fetch('/lanyuxi/settings', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
             if (!d || dead) return;
-            setRoll({ percent: d.rolloverPercent, used: d.usedChars || 0, limit: d.limitChars || 0, segment: d.segment || 0 });
+            setRoll({ percent: d.rolloverPercent, backupHours: d.backupHours || 6, used: d.usedChars || 0, limit: d.limitChars || 0, segment: d.segment || 0 });
           }).catch(function () {});
         }
         load();
@@ -357,6 +357,31 @@ window.__ModuleLoader__.load({
           onKeyDown: function (e) { if (e.key === 'Enter') savePercent(e.target.value); },
         }),
         h('span', null, '% 就开新一段'),
+        h('span', { style: { width: 14 } }),
+        h('span', null, '备份间隔'),
+        h('input', {
+          type: 'number', min: 1, max: 72, step: 1,
+          value: roll.backupHours,
+          style: { width: 52, background: '#141b26', color: '#dfe7ff', border: '1px solid rgba(91,140,255,.35)', borderRadius: 8, padding: '3px 6px', fontSize: 12.5 },
+          onChange: function (e) { setRoll(function (prev) { return { ...prev, backupHours: e.target.value }; }); },
+          onBlur: function (e) {
+            const h = Math.round(Number(e.target.value));
+            if (!Number.isFinite(h) || h < 1 || h > 72) return;
+            setRoll(function (prev) { return { ...prev, backupHours: h }; });
+            fetch('/lanyuxi/settings?backupHours=' + h, { method: 'POST' }).catch(function () {});
+          },
+        }),
+        h('span', null, '小时'),
+        h('button', {
+          className: 'btn ghost',
+          style: { padding: '4px 10px', fontSize: 12 },
+          onClick: function () {
+            lyxToast('正在备份…');
+            fetch('/lanyuxi/backup', { method: 'POST' }).then(function (r) { return r.json(); }).then(function (d) {
+              lyxToast(d && d.ok ? ('已备份 ' + d.copied + ' 个文件') : ('备份失败：' + ((d && d.error) || '未知')));
+            }).catch(function () { lyxToast('备份失败：接口不可用'); });
+          },
+        }, '立即备份'),
         h('span', { style: { marginLeft: 'auto', fontSize: 11.5, color: '#7f8ea3' } },
           roll.limit ? ('第 ' + (roll.segment || 0) + ' 段 · 已用 ' + Math.round(roll.used / roll.limit * 100) + '%') : ''));
 

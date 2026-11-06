@@ -275,11 +275,12 @@ export function apply(ctx, rawConfig) {
     }
   }
   const settingsPath = () => join(config.sessionCwd || process.cwd(), ".lanyuxi-settings.json")
-  const settings = { rolloverPercent: config.rolloverPercent || 50 }
+  const settings = { rolloverPercent: config.rolloverPercent || 50, backupHours: 6 }
   try {
     if (existsSync(settingsPath())) {
       const loaded = JSON.parse(readFileSync(settingsPath(), "utf8"))
       if (loaded && Number.isFinite(loaded.rolloverPercent)) settings.rolloverPercent = loaded.rolloverPercent
+      if (loaded && Number.isFinite(loaded.backupHours)) settings.backupHours = loaded.backupHours
     }
   } catch {}
   function saveSettings() {
@@ -626,7 +627,7 @@ export function apply(ctx, rawConfig) {
     return join(config.sessionCwd || process.cwd(), "backup")
   }
   let lastActivityAt = 0
-  let lastBackupAt = 0
+  let lastBackupAt = Date.now()
 
   /** 会话目录在 since 之后有没有新写入。 */
   function sessionsChangedSince(since) {
@@ -824,10 +825,16 @@ export function apply(ctx, rawConfig) {
               settings.rolloverPercent = Math.round(q)
               saveSettings()
             }
+            const h = Number(url.searchParams.get("backupHours"))
+            if (Number.isFinite(h) && h >= 1 && h <= 72) {
+              settings.backupHours = Math.round(h)
+              saveSettings()
+            }
           }
           const cur = sessionState.current
           return send(200, {
             rolloverPercent: settings.rolloverPercent,
+            backupHours: settings.backupHours,
             contextWindowTokens: config.contextWindowTokens || 1048576,
             limitChars: currentLimit(),
             usedChars: cur ? cur.chars : 0,
@@ -894,11 +901,13 @@ export function apply(ctx, rawConfig) {
 
   ctx.effect(() => {
     const backupTimer = setInterval(() => {
+      const interval = (settings.backupHours || 6) * 60 * 60 * 1000
+      if (Date.now() - lastBackupAt < interval) return
       const idle = !lastActivityAt || Date.now() - lastActivityAt > 12 * 60 * 60 * 1000
       if (idle) return
       if (!sessionsChangedSince(lastBackupAt)) return
       backupSessions("scheduled")
-    }, 6 * 60 * 60 * 1000)
+    }, 60 * 1000)
     return () => clearInterval(backupTimer)
   }, "lanyuxi: 会话备份")
 
