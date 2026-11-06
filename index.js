@@ -106,6 +106,7 @@ export function apply(ctx, rawConfig) {
   let closed = false
   let backoff = 1000
   let selfId = ""
+  let selfNickname = ""
   let connected = false
   let verified = false
   const diag = { events: 0, messages: 0, droppedSelf: 0, droppedGroup: 0, droppedPrivate: 0, droppedEmpty: 0, duplicates: 0, delivered: 0, deliverErrors: 0, lastError: "", recent: [] }
@@ -632,6 +633,7 @@ export function apply(ctx, rawConfig) {
       logger.info?.(`[lanyuxi] 已连上 NapCat ${url}`)
       request("get_login_info", {}).then((data) => {
         selfId = String(data?.user_id ?? "")
+        selfNickname = String(data?.nickname ?? "")
         logger.info?.(`[lanyuxi] 登录中的 QQ: ${selfId} (${data?.nickname ?? "?"})`)
         return request("get_status", {})
       }).then(() => {
@@ -767,6 +769,32 @@ export function apply(ctx, rawConfig) {
       }, null, 2)
     },
   })
+
+  // —— 她的「心情」：根据时间与最近聊天状态生成一句，M3 会换成真实情绪系统 ——
+  function moodLine() {
+    const now = new Date()
+    const h = now.getHours()
+    const idleMin = lastActivityAt ? Math.floor((Date.now() - lastActivityAt) / 60000) : -1
+    const pool = []
+    if (muted()) {
+      pool.push("我现在不想说话……你先忙你的。", "（闭嘴中）……哼。", "安静一会儿，别吵。")
+    } else if (idleMin < 0 || idleMin > 240) {
+      pool.push(
+        h >= 23 || h < 6 ? "这么晚还没睡？……我才不是担心你，我是怕你明天没精神陪我。" : "你人呢？一天不见人影。……我也没在等你啦，就是刚好有空。",
+        "有点闷。……你要是再不来，我就自己去翻视频看了。",
+        "盯了一会儿门口（屏幕）。……算了，你不来我也能自己玩。",
+      )
+    } else if (idleMin < 10) {
+      pool.push("刚刚还在聊，现在又没声了，你说话说一半就走？","嗯……聊得正起劲呢，你就跑了。","我还在想刚才那句，你是不是又在逗我。")
+    } else {
+      pool.push(
+        "你不说话的时候，我就在这儿待着。……不无聊，真的。",
+        "刚才翻到个东西，想着你要是在就好了。算了，等你有空再说。",
+        "有点想找你，但不想显得我很闲。……所以你最好主动点。",
+      )
+    }
+    return pool[Math.floor(Math.random() * pool.length)]
+  }
 
   // —— 三个急停刹车：静音 / 暂停社交 / 停 B 站 ——
   const brakesPath = () => join(config.sessionCwd || process.cwd(), ".lanyuxi-brakes.json")
@@ -1013,7 +1041,8 @@ export function apply(ctx, rawConfig) {
           } catch {}
           const cur = sessionState.current
           return send(200, {
-            connected, verified, selfId, ownerQq: config.ownerQq,
+            connected, verified, selfId, selfNickname, ownerQq: config.ownerQq,
+            mood: moodLine(),
             muted: muted(), socialPaused: Boolean(brakes.socialPaused), biliPaused: Boolean(brakes.biliPaused),
             todaySent: quota.count,
             maxOutboundPerDay: config.maxOutboundPerDay,
@@ -1116,6 +1145,7 @@ export function apply(ctx, rawConfig) {
             const info = await request("get_login_info", {})
             const st = await request("get_status", {})
             selfId = String(info?.user_id ?? selfId)
+      selfNickname = String(info?.nickname ?? selfNickname)
             let sent = false
             if (config.ownerQq) {
               const stamp = new Date().toLocaleTimeString("zh-CN", { hour12: false })

@@ -359,27 +359,35 @@ window.__ModuleLoader__.load({
           const hero = root.querySelector('.card.hero');
           if (hero) {
             const pill = hero.querySelector('h3 .pill');
-            setText(pill, d.muted ? '静音中' : (d.connected ? '在线' : '掉线'));
-            if (pill) pill.className = 'pill ' + (d.muted ? 'warn' : (d.connected ? 'ok' : 'off'));
-            const last = (d.recent || []).filter(function (l) { return l.indexOf('**蓝余汐**') >= 0; })[0];
-            if (last) {
-              const body = last.replace(/^- \d{2}:\d{2} \*\*蓝余汐\*\*：/, '');
-              setText(hero.querySelector('.quote'), '「' + body + '」');
-            }
+            if (pill) pill.style.display = 'none';
+            if (d.mood) setText(hero.querySelector('.quote'), '「' + d.mood + '」');
             const when = (d.recent || [])[0];
             const m = when ? when.match(/^- (\d{2}:\d{2})/) : null;
-            setText(hero.querySelector('.who'), m ? ('刚才 ' + m[1] + ' · 今天在这个会话里聊了 ' + (d.received || 0) + ' 句') : '今天还没聊过');
+            setText(hero.querySelector('.who'), m ? ('刚才 ' + m[1] + ' · 今天聊了 ' + (d.received || 0) + ' 句') : '今天还没聊过');
           }
 
           const qqCard = cardBy('QQ');
           if (qqCard) {
+            const nm = qqCard.querySelector('.nm');
             const acc = qqCard.querySelector('.nm .acc');
             if (acc && d.selfId) { acc.textContent = d.selfId; acc.setAttribute('onclick', "toast('已复制 QQ 号：" + d.selfId + "')"); }
-            setText(qqCard.querySelector('.sub'), '今日发言 ' + (d.todaySent || 0) + ' 条 · ' + (d.connected ? (d.verified ? '在线已验证' : '在线待验证') : '离线'));
-            const chips = qqCard.querySelector('.gchips');
-            if (chips && d.allowGroups) {
-              chips.innerHTML = d.allowGroups.map(function (g) { return '<span>' + g + '</span>'; }).join('') + '<span class="plus" onclick="toast(\'白名单群在 config 里改\')">＋ 加群</span>';
+            if (nm && d.selfNickname) {
+              const first = Array.prototype.slice.call(nm.childNodes).filter(function (n) { return n.nodeType === 3; })[0];
+              if (first) first.textContent = d.selfNickname + ' ';
             }
+            const pav = qqCard.querySelector('.pav');
+            if (pav && d.selfId && d.connected) {
+              const badge = pav.querySelector('.pbadge');
+              pav.innerHTML = '';
+              const img = document.createElement('img');
+              img.src = 'https://q1.qlogo.cn/g?b=qq&nk=' + d.selfId + '&s=640';
+              img.alt = d.selfNickname || d.selfId;
+              img.style.cssText = 'width:100%;height:100%;border-radius:10px;object-fit:cover;display:block';
+              img.onerror = function () { img.style.display = 'none'; };
+              pav.appendChild(img);
+              if (badge) pav.appendChild(badge);
+            }
+            setText(qqCard.querySelector('.sub'), '今日发言 ' + (d.todaySent || 0) + ' 条');
           }
 
           const timeline = cardBy('她今天怎么过的');
