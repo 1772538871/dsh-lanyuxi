@@ -84,7 +84,7 @@ window.__ModuleLoader__.load({
     }
 
     function LanyuxiSettings() {
-      const [tab, setTab] = React.useState('platforms');
+      const [tab, setTab] = React.useState('overview');
       const [scan, setScan] = React.useState(null);
       const [roll, setRoll] = React.useState({ percent: 50, backupHours: 24, backupEnabled: true, used: 0, limit: 0, segment: 0 });
       React.useEffect(function () {
