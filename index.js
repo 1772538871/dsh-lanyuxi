@@ -21,6 +21,7 @@ const DEFAULTS = {
   sessionCwd: "",
   cooldownMs: 300000,
   privateCooldownMs: 5000,
+  segmentCharLimit: 200000,
   maxOutboundPerDay: 20,
   maxProactivePerDay: 3,
   napcatPanel: "http://127.0.0.1:6100",
@@ -180,18 +181,21 @@ export function apply(ctx, rawConfig) {
     const who = messageType === "group"
       ? `群 ${groupId} 里的 ${event.sender?.card || event.sender?.nickname || userId}`
       : "主人"
-    try { await ensureAgentForBucket() } catch {}
+    const seg = segmentInfo(text.length)
+    const prevId = seg.segment > 1 ? seg.base + "-" + (seg.segment - 1) : prevBucketKey()
+    try { await ensureAgentForBucket(seg.id) } catch {}
     const fresh = Boolean(diag.freshSession)
     diag.freshSession = false
+    diag.segment = seg.segment
     const prompt = [
       `【QQ · ${messageType === "group" ? "群聊" : "私聊"}】${who} 说：${text}`,
       `必须用 qq_send 工具回一句话（不填 target 默认回给当前这个聊天）。只在会话里回答、不调用 qq_send，主人是收不到的。`,
-      fresh ? `【新会话】这是「${bucketTitle()}」的第一条。上一段会话的 id 是 ${prevBucketKey()}，主人提到以前的事先用会话检索去查这个 id 再回答。`
-            : `（当前会话 ${bucketKey()}，覆盖 ${bucketTitle()}；上一段是 ${prevBucketKey()}。需要回忆旧事就去检索那个 id。）`,
+      fresh ? `【新会话】这是「${bucketTitle()}」第 ${seg.segment} 段的开头。上一段会话的 id 是 ${prevId}，主人提到以前的事先用会话检索去查这个 id 再回答。`
+            : `（当前会话 ${seg.id}，覆盖 ${bucketTitle()} 第 ${seg.segment} 段；上一段是 ${prevId}。需要回忆旧事就去检索那个 id。）`,
     ].join("\n")
 
-    await titleForBucket(bucketKey(), text)
-    await deliver(prompt)
+    await titleForBucket(seg.id, text)
+    await deliver(prompt, seg.id)
     diag.delivered += 1
   }
 
@@ -246,10 +250,39 @@ export function apply(ctx, rawConfig) {
     const s = bucketStart(d)
     return "lanyuxi-msg-" + ymd(new Date(s.getTime() - DAY_MS))
   }
+  /** 每段会话的累计体量，用来决定"要不要续下一段"。 */
+  const sessionStatePath = () => join(config.sessionCwd || process.cwd(), ".lanyuxi-sessions.json")
+  let sessionState = {}
+  try {
+    if (existsSync(sessionStatePath())) sessionState = JSON.parse(readFileSync(sessionStatePath(), "utf8"))
+  } catch {}
+  function saveSessionState() {
+    try {
+      mkdirSync(config.sessionCwd || process.cwd(), { recursive: true })
+      writeFileSync(sessionStatePath(), JSON.stringify(sessionState, null, 2), "utf8")
+    } catch (error) {
+      diag.stateError = String(error)
+    }
+  }
+  /** 当前应使用的会话 id：桶 + 段号；段号在体量超限时递增。 */
+  function segmentInfo(textLength = 0) {
+    const base = bucketKey()
+    const entry = sessionState[base] || { segment: 1, chars: 0 }
+    const limit = config.segmentCharLimit || 200000
+    if (entry.chars + textLength > limit) {
+      entry.segment += 1
+      entry.chars = 0
+    }
+    entry.chars += textLength
+    sessionState[base] = entry
+    saveSessionState()
+    return { base, segment: entry.segment, id: entry.segment > 1 ? base + "-" + entry.segment : base }
+  }
+
   /** 每三天一个会话：第一次说话时创建，之后复用；跨桶自动换新会话。 */
-  async function ensureAgentForBucket() {
+  async function ensureAgentForBucket(sessionId) {
     const agents = ctx.get("agents")
-    const key = bucketKey()
+    const key = sessionId || bucketKey()
     let agent = agents.get(key)
     if (agent) { diag.freshSession = false; return agent }
     try {
@@ -319,11 +352,11 @@ export function apply(ctx, rawConfig) {
   }
 
   /** 把消息灌进她今天的会话，让她醒过来。 */
-  async function deliver(text) {
+  async function deliver(text, sessionId) {
     const agents = ctx.get("agents")
     if (agents) {
       try {
-        const agent = await ensureAgentForBucket()
+        const agent = await ensureAgentForBucket(sessionId)
         const message = {
           id: randomUUID(),
           role: "user",
@@ -610,7 +643,8 @@ export function apply(ctx, rawConfig) {
         }
         if (url.pathname === "/lanyuxi/selftest") {
           try {
-            await deliver("【自检】有人吗？")
+            const seg = segmentInfo(0)
+            await deliver("【自检】有人吗？", seg.id)
             return send(200, { ok: true, via: diag.via, delivered: diag.delivered })
           } catch (error) {
             return send(500, { ok: false, via: diag.via, error: String(error), lastError: diag.lastError })
