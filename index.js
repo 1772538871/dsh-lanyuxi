@@ -205,7 +205,9 @@ export function apply(ctx, rawConfig) {
         if (!cur) return ""
         const map = { 0: "晴", 1: "晴", 2: "多云", 3: "阴", 45: "雾", 48: "雾", 51: "小雨", 53: "小雨", 55: "雨", 61: "小雨", 63: "雨", 65: "大雨", 71: "雪", 73: "雪", 75: "大雪", 80: "阵雨", 81: "阵雨", 82: "暴雨", 95: "雷阵雨", 96: "雷阵雨", 99: "雷阵雨" }
         const label = map[cur.weather_code] || "多云"
-        return label + " " + Math.round(cur.temperature_2m) + "°C"
+        const c = cur.temperature_2m
+        const feel = c >= 32 ? "热得慌" : c >= 28 ? "有点热" : c >= 24 ? "不冷不热" : c >= 18 ? "凉快" : c >= 10 ? "有点冷" : c >= 0 ? "冷" : "冷得受不了"
+        return label + "，" + feel
       } catch {
         return ""
       }
@@ -226,12 +228,12 @@ export function apply(ctx, rawConfig) {
         const w = await todayWeather()
         const now2 = new Date()
         const week = "日一二三四五六"[now2.getDay()]
-        const head = `${now2.getFullYear()}年${now2.getMonth() + 1}月${now2.getDate()}日 星期${week} 天气：${w || "（你自己挑一个，晴/多云/阴 都行）"}`
+        const head = `${now2.getFullYear()}年${now2.getMonth() + 1}月${now2.getDate()}日 星期${week} 天气：${w || "（自己挑，写晴/多云/小雨 + 热/凉快/冷 这种）"} 心情：${"（自己写一个词）"}`
         diaryTask = [
           `【今天的第一件事】现在先写日记，写两篇，都写到 ${base}\\diary\\ 下：`,
           `1) 表日记：${base}\\diary\\to-owner\\${month}\\${dayName}.md —— 给主人看的小学生作文，200 字以内。`,
           `2) 里日记：${base}\\diary\\private\\${month}\\${dayName}.md —— 只给自己看，可以嘴硬、可以承认在意。`,
-          `两篇的第一行都必须原样是这一行（日期/星期/天气）：`,
+          `两篇的第一行必须是这一行的样子（日期/星期/天气/心情），天气只写冷热凉快，不要写几度：`,
           head,
           `第二行空一行，然后自由写正文（不一定要「今天」开头，想怎么写就怎么写），写昨天跟他说了什么、他哪句话惹你笑了或气到你了。`,
           `写完再回这条消息；日记内容不要贴回 QQ。`,
