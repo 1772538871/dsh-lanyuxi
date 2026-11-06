@@ -21,7 +21,9 @@ const DEFAULTS = {
   sessionCwd: "",
   cooldownMs: 300000,
   privateCooldownMs: 5000,
-  segmentCharLimit: 200000,
+  rolloverPercent: 50,
+  contextWindowTokens: 1048576,
+  charsPerToken: 1,
   maxOutboundPerDay: 20,
   maxProactivePerDay: 3,
   napcatPanel: "http://127.0.0.1:6100",
@@ -182,19 +184,23 @@ export function apply(ctx, rawConfig) {
       ? `群 ${groupId} 里的 ${event.sender?.card || event.sender?.nickname || userId}`
       : "主人"
     const seg = segmentInfo(text.length)
-    const prevId = seg.segment > 1 ? seg.base + "-" + (seg.segment - 1) : prevBucketKey()
+    const prevId = (sessionState.current && sessionState.current.prevId) || ""
     try { await ensureAgentForBucket(seg.id) } catch {}
     const fresh = Boolean(diag.freshSession)
     diag.freshSession = false
     diag.segment = seg.segment
+    const clock = new Date()
+    const timeLine = seg.newDay
+      ? `【现在是 ${stampNow(clock)}】`
+      : `【${z2(clock.getHours())}:${z2(clock.getMinutes())}】`
     const prompt = [
-      `【QQ · ${messageType === "group" ? "群聊" : "私聊"}】${who} 说：${text}`,
+      timeLine + `【QQ · ${messageType === "group" ? "群聊" : "私聊"}】${who} 说：${text}`,
       `必须用 qq_send 工具回一句话（不填 target 默认回给当前这个聊天）。只在会话里回答、不调用 qq_send，主人是收不到的。`,
-      fresh ? `【新会话】这是「${bucketTitle()}」第 ${seg.segment} 段的开头。上一段会话的 id 是 ${prevId}，主人提到以前的事先用会话检索去查这个 id 再回答。`
-            : `（当前会话 ${seg.id}，覆盖 ${bucketTitle()} 第 ${seg.segment} 段；上一段是 ${prevId}。需要回忆旧事就去检索那个 id。）`,
+      fresh ? `【新一段会话】这是第 ${seg.segment} 段（上一段装满了才开这段）。上一段会话的 id 是 ${prevId || "（无，这是第一段）"}，主人提到以前的事先用会话检索去查这个 id 再回答。`
+            : `（当前会话 ${seg.id} 第 ${seg.segment} 段；上一段是 ${prevId || "（无）"}。需要回忆旧事就去检索那个 id。）`,
     ].join("\n")
 
-    await titleForBucket(seg.id, text)
+    await titleForSegment(seg, text)
     await deliver(prompt, seg.id)
     diag.delivered += 1
   }
@@ -264,25 +270,69 @@ export function apply(ctx, rawConfig) {
       diag.stateError = String(error)
     }
   }
-  /** 当前应使用的会话 id：桶 + 段号；段号在体量超限时递增。 */
-  function segmentInfo(textLength = 0) {
-    const base = bucketKey()
-    const entry = sessionState[base] || { segment: 1, chars: 0 }
-    const limit = config.segmentCharLimit || 200000
-    if (entry.chars + textLength > limit) {
-      entry.segment += 1
-      entry.chars = 0
+  const settingsPath = () => join(config.sessionCwd || process.cwd(), ".lanyuxi-settings.json")
+  const settings = { rolloverPercent: config.rolloverPercent || 50 }
+  try {
+    if (existsSync(settingsPath())) {
+      const loaded = JSON.parse(readFileSync(settingsPath(), "utf8"))
+      if (loaded && Number.isFinite(loaded.rolloverPercent)) settings.rolloverPercent = loaded.rolloverPercent
     }
-    entry.chars += textLength
-    sessionState[base] = entry
+  } catch {}
+  function saveSettings() {
+    try {
+      mkdirSync(config.sessionCwd || process.cwd(), { recursive: true })
+      writeFileSync(settingsPath(), JSON.stringify(settings, null, 2), "utf8")
+    } catch (error) {
+      diag.stateError = String(error)
+    }
+  }
+  /** 上下文用到多少就换新段：百分比 × 窗口 × 每 token 字符数。 */
+  function currentLimit() {
+    const window = config.contextWindowTokens || 1048576
+    const cpt = config.charsPerToken || 1
+    return Math.max(1000, Math.floor(window * (settings.rolloverPercent / 100) * cpt))
+  }
+
+  const WEEK = ["日", "一", "二", "三", "四", "五", "六"]
+  function stampNow(d = new Date()) {
+    return d.getFullYear() + "-" + z2(d.getMonth() + 1) + "-" + z2(d.getDate()) + " " +
+      z2(d.getHours()) + ":" + z2(d.getMinutes()) + " 星期" + WEEK[d.getDay()]
+  }
+
+  /** 纯按体量切：装不下才开下一段，与日历无关。 */
+  function segmentInfo(textLength = 0) {
+    const now = new Date()
+    const day = ymd(now)
+    const limit = currentLimit()
+    let cur = sessionState.current
+    let fresh = false
+    let newDay = false
+    if (!cur || cur.chars + textLength > limit) {
+      sessionState.seq = (sessionState.seq || 0) + 1
+      cur = {
+        id: "lanyuxi-msg-" + String(sessionState.seq).padStart(3, "0"),
+        chars: 0,
+        firstDay: day,
+        lastDay: day,
+        prevId: cur ? cur.id : "",
+        titleBase: "",
+      }
+      fresh = true
+      newDay = true
+    } else if (cur.lastDay !== day) {
+      newDay = true
+    }
+    cur.chars += textLength
+    cur.lastDay = day
+    sessionState.current = cur
     saveSessionState()
-    return { base, segment: entry.segment, id: entry.segment > 1 ? base + "-" + entry.segment : base }
+    return { id: cur.id, fresh, newDay, day, segment: sessionState.seq }
   }
 
   /** 每三天一个会话：第一次说话时创建，之后复用；跨桶自动换新会话。 */
   async function ensureAgentForBucket(sessionId) {
     const agents = ctx.get("agents")
-    const key = sessionId || bucketKey()
+    const key = sessionId || (sessionState.current ? sessionState.current.id : "lanyuxi-msg-000")
     let agent = agents.get(key)
     if (agent) { diag.freshSession = false; return agent }
     try {
@@ -318,21 +368,28 @@ export function apply(ctx, rawConfig) {
     return agent
   }
 
-  let titledBucket = ""
+  let titledSignature = ""
 
-  /** 用当天第一句话当话题，标题形如「在吗—11月3号到5号」。 */
-  async function titleForBucket(key, sample) {
-    if (titledBucket === key) return
-    const topic = String(sample).replace(/\s+/g, " ").trim().slice(0, 12) || "聊天"
-    const title = topic + "—" + cnRange()
+  function dayOf(stamp) {
+    return new Date(Number(stamp.slice(0, 4)), Number(stamp.slice(4, 6)) - 1, Number(stamp.slice(6, 8)))
+  }
+
+  /** 标题 = 第一句话 + 这段实际覆盖的日期区间，随最后一天变化而更新。 */
+  async function titleForSegment(seg, sample) {
+    const cur = sessionState.current
+    if (!cur) return
+    if (!cur.titleBase) cur.titleBase = String(sample).replace(/\s+/g, " ").trim().slice(0, 12) || "聊天"
+    const signature = cur.id + "|" + cur.lastDay
+    if (titledSignature === signature) return
+    const title = cur.titleBase + "—" + md(dayOf(cur.firstDay)) + "到" + md(dayOf(cur.lastDay))
     try {
       const st = ctx.get("sessionTitle")
       const agents = ctx.get("agents")
-      const agent = agents ? agents.get(key) : undefined
+      const agent = agents ? agents.get(seg.id) : undefined
       const session = agent && agent.session
       if (st && session && typeof st.rename === "function") {
         st.rename(session, title)
-        titledBucket = key
+        titledSignature = signature
         diag.title = "service:" + title
         return
       }
@@ -342,8 +399,8 @@ export function apply(ctx, rawConfig) {
     try {
       const sc = ctx.get("sessionController")
       if (sc && typeof sc.rename === "function") {
-        await sc.rename({ sessionId: key, title })
-        titledBucket = key
+        await sc.rename({ sessionId: seg.id, title })
+        titledSignature = signature
         diag.title = "remote:" + title
       }
     } catch (error) {
@@ -367,7 +424,7 @@ export function apply(ctx, rawConfig) {
         for (const method of ["followup", "queue", "send"]) {
           if (typeof agent[method] === "function") {
             await agent[method](message)
-            diag.via = "agent." + method + ":" + bucketKey()
+            diag.via = "agent." + method + ":" + (sessionState.current ? sessionState.current.id : "?")
             return
           }
         }
@@ -649,6 +706,24 @@ export function apply(ctx, rawConfig) {
           } catch (error) {
             return send(500, { ok: false, via: diag.via, error: String(error), lastError: diag.lastError })
           }
+        }
+        if (url.pathname === "/lanyuxi/settings") {
+          if (req.method === "POST") {
+            const q = Number(url.searchParams.get("rolloverPercent"))
+            if (Number.isFinite(q) && q >= 10 && q <= 90) {
+              settings.rolloverPercent = Math.round(q)
+              saveSettings()
+            }
+          }
+          const cur = sessionState.current
+          return send(200, {
+            rolloverPercent: settings.rolloverPercent,
+            contextWindowTokens: config.contextWindowTokens || 1048576,
+            limitChars: currentLimit(),
+            usedChars: cur ? cur.chars : 0,
+            sessionId: cur ? cur.id : "",
+            segment: sessionState.seq || 0,
+          })
         }
         if (url.pathname === "/lanyuxi/diag") {
           return send(200, { ...diag, connected, selfId, ownerQq: config.ownerQq, allowGroups: config.allowGroups })

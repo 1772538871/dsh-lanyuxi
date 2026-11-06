@@ -26,6 +26,8 @@ window.__ModuleLoader__.load({
 .lyx-scope .btn[style*="width:100%"]{width:auto !important;display:block;margin:8px 0 0 auto !important;padding:5px 12px;font-size:12px;border-radius:8px}
 .lyx-scope .btn[onclick*="openScan"]{background:linear-gradient(140deg,#3f6fe0,#5b8cff) !important;border-color:transparent !important;color:#fff !important;font-weight:600}
 .lyx-scope .btn:disabled{opacity:.55;cursor:progress}
+.lyx-scope .lyx-roll{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 12px;padding:8px 12px;border:1px solid rgba(91,140,255,.22);border-radius:10px;background:linear-gradient(135deg,rgba(91,140,255,.12),rgba(160,107,255,.07));font-size:12.5px;color:#a9b8cc}
+.lyx-scope .lyx-roll select{background:#141b26;color:#dfe7ff;border:1px solid rgba(91,140,255,.35);border-radius:8px;padding:3px 8px;font-size:12.5px;cursor:pointer}
 .lyx-scope .btn[data-bound="1"]{background:linear-gradient(140deg,#e5484d,#c62b30) !important}
 .lyx-scope .qrbox{padding:8px}
 .lyx-scope .qrbox img{display:block;border-radius:8px}
@@ -82,6 +84,19 @@ window.__ModuleLoader__.load({
     function LanyuxiSettings() {
       const [tab, setTab] = React.useState('platforms');
       const [scan, setScan] = React.useState(null);
+      const [roll, setRoll] = React.useState({ percent: 70, used: 0, limit: 0, segment: 0 });
+      React.useEffect(function () {
+        let dead = false;
+        function load() {
+          fetch('/lanyuxi/settings', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+            if (!d || dead) return;
+            setRoll({ percent: d.rolloverPercent, used: d.usedChars || 0, limit: d.limitChars || 0, segment: d.segment || 0 });
+          }).catch(function () {});
+        }
+        load();
+        const timer = setInterval(load, 15000);
+        return function () { dead = true; clearInterval(timer); };
+      }, []);
       const boundRef = React.useRef(false);
       const [tick, setTick] = React.useState(Date.now());
       React.useEffect(function () {
@@ -324,6 +339,26 @@ window.__ModuleLoader__.load({
           b.onclick = function () { setTab(b.getAttribute('data-tab')); };
         }
       }, [tab]);
+
+      function savePercent(value) {
+        const pct = Math.round(Number(value));
+        if (!Number.isFinite(pct) || pct < 10 || pct > 90) return;
+        setRoll(function (prev) { return { ...prev, percent: pct }; });
+        fetch('/lanyuxi/settings?rolloverPercent=' + pct, { method: 'POST' }).catch(function () {});
+      }
+      const rollBar = h('div', { className: 'lyx-roll' },
+        h('span', null, '上下文用到'),
+        h('input', {
+          type: 'number', min: 10, max: 90, step: 5,
+          value: roll.percent,
+          style: { width: 62, background: '#141b26', color: '#dfe7ff', border: '1px solid rgba(91,140,255,.35)', borderRadius: 8, padding: '3px 6px', fontSize: 12.5 },
+          onChange: function (e) { setRoll(function (prev) { return { ...prev, percent: e.target.value }; }); },
+          onBlur: function (e) { savePercent(e.target.value); },
+          onKeyDown: function (e) { if (e.key === 'Enter') savePercent(e.target.value); },
+        }),
+        h('span', null, '% 就开新一段'),
+        h('span', { style: { marginLeft: 'auto', fontSize: 11.5, color: '#7f8ea3' } },
+          roll.limit ? ('第 ' + (roll.segment || 0) + ' 段 · 已用 ' + Math.round(roll.used / roll.limit * 100) + '%') : ''));
 
       return h('div', { className: 'lyx-scope lyx-layout' },
         h('aside', { className: 'lyx-rail', dangerouslySetInnerHTML: { __html: NAV } }),

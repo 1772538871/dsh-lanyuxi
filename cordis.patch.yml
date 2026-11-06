@@ -8,6 +8,10 @@
         allowGroups:
           - "1126049389"
         sessionCwd: E:\dsh-foundry\lanyuxi-msg
+        # 上下文用到多少百分比就开新的一段会话（面板上可改，10~90）
+        # 推荐 50：实测长上下文里，超过 50% 开始丢早期细节，70% 后容易忘约束，
+        # 90% 附近明显变笨（答非所问、重复、忽略人设）。宁可早切，靠会话检索跨段回忆。
+        rolloverPercent: 50
         cooldownMs: 300000
         maxOutboundPerDay: 20
         maxProactivePerDay: 3
