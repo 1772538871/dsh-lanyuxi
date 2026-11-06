@@ -185,11 +185,11 @@ export function apply(ctx, rawConfig) {
 
     const who = messageType === "group"
       ? `群 ${groupId} 里的 ${event.sender?.card || event.sender?.nickname || userId}`
-      : "主人"
+      : ownerLabel()
     const seg = segmentInfo(text.length)
     const prevId = (sessionState.current && sessionState.current.prevId) || ""
     lastActivityAt = Date.now()
-    appendTranscript(messageType === "group" ? ("群" + groupId + " " + who) : "主人", text)
+    appendTranscript(messageType === "group" ? ("群" + groupId + " " + who) : ownerLabel(), text)
     try { await ensureAgentForBucket(seg.id) } catch {}
     const fresh = Boolean(diag.freshSession)
     diag.freshSession = false
@@ -341,6 +341,21 @@ export function apply(ctx, rawConfig) {
   let systemSectionReady = false
 
   // —— 守门员：出站内容比对「禁说清单」，命中就拒发 ——
+  /** 主人称呼：一行多值，逗号/斜杠/顿号分隔，越靠前越优先。 */
+  function ownerAliases() {
+    const raw = readPersonaFile("称呼.txt") || ""
+    const list = raw
+      .split(/[,，/／|｜、\s]+/)
+      .map((s) => s.trim())
+      .filter((s) => s && !s.startsWith("#") && !s.startsWith("（"))
+    const unique = []
+    for (const item of list) if (!unique.includes(item)) unique.push(item)
+    return unique.length ? unique : ["主人"]
+  }
+  function ownerLabel() {
+    return ownerAliases()[0]
+  }
+
   function guardTerms() {
     const raw = readPersonaFile("禁说清单.md")
     if (!raw) return []
@@ -410,6 +425,19 @@ export function apply(ctx, rawConfig) {
         },
       })
       sp.section({
+        name: "lanyuxi-names",
+        order: 210,
+        text: function () {
+          const aliases = ownerAliases()
+          const list = aliases.join("、")
+          return [
+            `称呼主人时可以用：${list}（越靠前越常用）。`,
+            "按你当下的心情和场合挑一个，别每句都换、也别永远只用第一个。",
+            `严肃、安慰他的时候用最亲近的那个；闹着玩、损他的时候可以用更欠的那个。`,
+          ].join("\n")
+        },
+      })
+      sp.section({
         name: "lanyuxi-qq",
         order: 900,
         text: function () {
@@ -417,7 +445,7 @@ export function apply(ctx, rawConfig) {
           const id = cur ? cur.id : "（未建立）"
           const prev = cur && cur.prevId ? cur.prevId : ""
           const lines = [
-            `你正在 QQ 上和主人聊天（你的小号 ${selfId || "?"}，主人 ${config.ownerQq || "?"}）。`,
+            `你正在 QQ 上和${ownerLabel()}聊天（你的小号 ${selfId || "?"}，${ownerLabel()} ${config.ownerQq || "?"}）。`,
             "每收到一条消息，必须调用 qq_send 工具回一句话；只在会话里回答、不调用工具，主人是收不到的。",
             "qq_send 不填 target 就回给当前这个聊天。",
           ]
