@@ -165,6 +165,18 @@ export function apply(ctx, rawConfig) {
     const userId = String(event.user_id ?? "")
     const segments = Array.isArray(event.message) ? event.message : []
     const atMe = segments.some((s) => s?.type === "at" && String(s?.data?.qq) === selfId)
+    if (messageType === "group") diag.groupSeen = (diag.groupSeen || 0) + 1
+    if (atMe) diag.atSeen = (diag.atSeen || 0) + 1
+    diag.lastMsg = {
+      at: Date.now(),
+      type: messageType,
+      gid: groupId,
+      uid: userId,
+      atMe,
+      selfId,
+      segTypes: segments.map((s) => s?.type).join(","),
+      text: String(text).slice(0, 60),
+    }
     let text = segments.filter((s) => s?.type === "text").map((s) => s?.data?.text ?? "").join("").trim()
     if (!text && typeof event.raw_message === "string") text = event.raw_message.trim()
     if (!text) { diag.droppedEmpty += 1; return }
