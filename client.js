@@ -341,6 +341,55 @@ window.__ModuleLoader__.load({
       }, [tab]);
 
       React.useEffect(function () {
+        if (tab !== 'guard') return;
+        const root = document.querySelector('.lyx-scope #view-guard');
+        if (!root) return;
+        let dead = false;
+        function post(action) {
+          return fetch('/lanyuxi/brakes?action=' + action, { method: 'POST' }).then(function (r) { return r.json(); });
+        }
+        function paint(d) {
+          if (dead || !d) return;
+          const btns = Array.prototype.slice.call(root.querySelectorAll('button'));
+          const muteBtn = btns.filter(function (b) { return b.textContent.indexOf('静音') >= 0 || b.textContent.indexOf('取消静音') >= 0; })[0];
+          const socialBtn = btns.filter(function (b) { return b.textContent.indexOf('社交') >= 0; })[0];
+          const biliBtn = btns.filter(function (b) { return b.textContent.indexOf('B 站') >= 0; })[0];
+          if (muteBtn) {
+            if (d.muted) {
+              const left = Math.max(1, Math.round((d.muteUntil - Date.now()) / 60000));
+              muteBtn.textContent = '取消静音（还剩 ' + left + ' 分钟）';
+              muteBtn.className = 'btn danger';
+              muteBtn.onclick = function () { post('unmute').then(paint); };
+            } else {
+              muteBtn.textContent = '静音 2 小时（一句都不说）';
+              muteBtn.className = 'btn';
+              muteBtn.onclick = function () { post('mute').then(paint); };
+            }
+          }
+          if (socialBtn) {
+            socialBtn.textContent = d.socialPaused ? '恢复社交（现在只看不说）' : '暂停社交（群里只看不说）';
+            socialBtn.className = d.socialPaused ? 'btn danger' : 'btn';
+            socialBtn.onclick = function () { post(d.socialPaused ? 'social-off' : 'social-on').then(paint); };
+          }
+          if (biliBtn) {
+            biliBtn.textContent = d.biliPaused ? '恢复 B 站' : '停掉 B 站';
+            biliBtn.className = d.biliPaused ? 'btn danger' : 'btn';
+            biliBtn.onclick = function () { post(d.biliPaused ? 'bili-off' : 'bili-on').then(paint); };
+          }
+          const kv = root.querySelector('.kv');
+          if (kv) {
+            const vals = Array.prototype.slice.call(kv.querySelectorAll('div')).filter(function (el) { return !el.className; });
+            if (vals.length >= 6) {
+              vals[1].textContent = '拦下 ' + (d.guardBlocked || 0) + ' 次';
+              vals[3].textContent = '拦下 ' + ((d.mutedSkip || 0) + (d.socialSkip || 0)) + ' 次（静音/暂停社交）';
+            }
+          }
+        }
+        fetch('/lanyuxi/brakes', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(paint).catch(function () {});
+        return function () { dead = true; };
+      }, [tab]);
+
+      React.useEffect(function () {
         if (tab !== 'persona') return;
         const root = document.querySelector('.lyx-scope #view-persona');
         if (!root) return;

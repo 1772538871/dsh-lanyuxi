@@ -186,6 +186,8 @@ export function apply(ctx, rawConfig) {
     const who = messageType === "group"
       ? `群 ${groupId} 里的 ${event.sender?.card || event.sender?.nickname || userId}`
       : ownerLabel()
+    if (muted()) { diag.mutedSkip = (diag.mutedSkip || 0) + 1; return }
+    if (brakes.socialPaused && messageType === "group") { diag.socialSkip = (diag.socialSkip || 0) + 1; return }
     const seg = segmentInfo(text.length)
     const prevId = (sessionState.current && sessionState.current.prevId) || ""
     lastActivityAt = Date.now()
@@ -710,6 +712,8 @@ export function apply(ctx, rawConfig) {
       if (type === "private" && config.ownerQq && id !== config.ownerQq) throw new Error("只能私聊主人")
 
       const chatKey = type === "group" ? `group:${id}` : `private:${id}`
+      if (muted()) throw new Error("现在是静音时间，她一句话都不会说（面板可以取消静音）")
+      if (brakes.socialPaused && type === "group") throw new Error("社交已暂停，她不在群里说话（私聊照常）")
       const hit = guardCheck(args.text)
       if (hit) {
         diag.guardBlocked = (diag.guardBlocked || 0) + 1
@@ -763,6 +767,17 @@ export function apply(ctx, rawConfig) {
       }, null, 2)
     },
   })
+
+  // —— 三个急停刹车：静音 / 暂停社交 / 停 B 站 ——
+  const brakesPath = () => join(config.sessionCwd || process.cwd(), ".lanyuxi-brakes.json")
+  const brakes = { muteUntil: 0, socialPaused: false, biliPaused: false }
+  try {
+    if (existsSync(brakesPath())) Object.assign(brakes, JSON.parse(readFileSync(brakesPath(), "utf8")))
+  } catch {}
+  function saveBrakes() {
+    try { writeFileSync(brakesPath(), JSON.stringify(brakes, null, 2), "utf8") } catch (error) { diag.brakesError = String(error) }
+  }
+  function muted() { return Date.now() < Number(brakes.muteUntil || 0) }
 
   // —— 纯文本对话记录：给人看、给以后做 RAG 用 ——
   function transcriptPath(d = new Date()) {
@@ -969,6 +984,29 @@ export function apply(ctx, rawConfig) {
           } catch (error) {
             return send(500, { ok: false, via: diag.via, error: String(error), lastError: diag.lastError })
           }
+        }
+        if (url.pathname === "/lanyuxi/brakes") {
+          const snapshot = () => ({
+            muted: muted(),
+            muteUntil: Number(brakes.muteUntil || 0),
+            socialPaused: Boolean(brakes.socialPaused),
+            biliPaused: Boolean(brakes.biliPaused),
+            guardBlocked: diag.guardBlocked || 0,
+            mutedSkip: diag.mutedSkip || 0,
+            socialSkip: diag.socialSkip || 0,
+          })
+          if (req.method === "POST") {
+            const action = url.searchParams.get("action") || ""
+            if (action === "mute") brakes.muteUntil = Date.now() + 2 * 60 * 60 * 1000
+            if (action === "unmute") brakes.muteUntil = 0
+            if (action === "social-on") brakes.socialPaused = true
+            if (action === "social-off") brakes.socialPaused = false
+            if (action === "bili-on") brakes.biliPaused = true
+            if (action === "bili-off") brakes.biliPaused = false
+            saveBrakes()
+            return send(200, snapshot())
+          }
+          return send(200, snapshot())
         }
         if (url.pathname === "/lanyuxi/persona") {
           if (req.method === "POST") {
