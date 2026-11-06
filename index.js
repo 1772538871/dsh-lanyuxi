@@ -339,11 +339,45 @@ export function apply(ctx, rawConfig) {
   /** 每三天一个会话：第一次说话时创建，之后复用；跨桶自动换新会话。 */
   let systemSectionReady = false
 
+  // —— 人格卡：读 lanyuxi-home\persona\ 下的 md，改了不用重启 ——
+  const personaCache = new Map()
+  function readPersonaFile(name) {
+    try {
+      const file = join(config.homeDir || "E:\\dsh-foundry\\lanyuxi-home", "persona", name)
+      if (!existsSync(file)) return ""
+      const mtime = statSync(file).mtimeMs
+      const cached = personaCache.get(file)
+      if (cached && cached.mtime === mtime) return cached.text
+      const text = readFileSync(file, "utf8").trim()
+      personaCache.set(file, { mtime, text })
+      return text
+    } catch (error) {
+      diag.personaError = String(error)
+      return ""
+    }
+  }
+  function personaText() {
+    const card = readPersonaFile("人格卡.md")
+    const fixes = readPersonaFile("纠正清单.md")
+    const parts = []
+    if (card) parts.push(card)
+    if (fixes) parts.push("## 主人对你说过的纠正\n\n" + fixes)
+    return parts.join("\n\n")
+  }
+
   /** 把「在 QQ 上怎么回话」挂成系统提示段，不塞进用户消息里。 */
   function setupAgentPrompt(agentCtx) {
     try {
       const sp = agentCtx && agentCtx.systemPrompt
       if (!sp || typeof sp.section !== "function") return
+      sp.section({
+        name: "lanyuxi-persona",
+        order: 200,
+        text: function () {
+          const persona = personaText()
+          return persona || "你叫蓝余汐，小名大肥鱼，小恶魔系傲娇女仆。说话短、口语、可以损主人两句但不许刻薄。"
+        },
+      })
       sp.section({
         name: "lanyuxi-qq",
         order: 900,
@@ -352,7 +386,7 @@ export function apply(ctx, rawConfig) {
           const id = cur ? cur.id : "（未建立）"
           const prev = cur && cur.prevId ? cur.prevId : ""
           const lines = [
-            "你正在 QQ 上和主人聊天（你的小号 2484026025，主人 1772538871）。",
+            `你正在 QQ 上和主人聊天（你的小号 ${selfId || "?"}，主人 ${config.ownerQq || "?"}）。`,
             "每收到一条消息，必须调用 qq_send 工具回一句话；只在会话里回答、不调用工具，主人是收不到的。",
             "qq_send 不填 target 就回给当前这个聊天。",
           ]
