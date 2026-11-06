@@ -762,64 +762,66 @@ window.__ModuleLoader__.load({
         setRoll(function (prev) { return { ...prev, percent: pct }; });
         fetch('/lanyuxi/settings?rolloverPercent=' + pct, { method: 'POST' }).catch(function () {});
       }
-      const rollBar = h('div', { className: 'lyx-roll' },
+      const inputStyle = { width: 62, background: '#141b26', color: '#dfe7ff', border: '1px solid rgba(91,140,255,.35)', borderRadius: 8, padding: '3px 6px', fontSize: 12.5 };
+      const rollRow1 = h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', width: '100%' } },
         h('span', null, '上下文用到'),
         h('input', {
           type: 'number', min: 10, max: 90, step: 5,
           value: roll.percent,
-          style: { width: 62, background: '#141b26', color: '#dfe7ff', border: '1px solid rgba(91,140,255,.35)', borderRadius: 8, padding: '3px 6px', fontSize: 12.5 },
+          style: inputStyle,
           onChange: function (e) { setRoll(function (prev) { return { ...prev, percent: e.target.value }; }); },
           onBlur: function (e) { savePercent(e.target.value); },
           onKeyDown: function (e) { if (e.key === 'Enter') savePercent(e.target.value); },
         }),
         h('span', null, '% 就开新一段'),
-        h('span', { style: { width: 14 } }),
+        h('span', { style: { width: 10 } }),
         h('span', null, '备份间隔'),
         h('input', {
           type: 'number', min: 1, max: 72, step: 1,
           value: roll.backupHours,
-          style: { width: 52, background: '#141b26', color: '#dfe7ff', border: '1px solid rgba(91,140,255,.35)', borderRadius: 8, padding: '3px 6px', fontSize: 12.5 },
+          style: { ...inputStyle, width: 52 },
           onChange: function (e) { setRoll(function (prev) { return { ...prev, backupHours: e.target.value }; }); },
           onBlur: function (e) {
-            const h = Math.round(Number(e.target.value));
-            if (!Number.isFinite(h) || h < 1 || h > 72) return;
-            setRoll(function (prev) { return { ...prev, backupHours: h }; });
-            fetch('/lanyuxi/settings?backupHours=' + h, { method: 'POST' }).catch(function () {});
+            const hours = Math.round(Number(e.target.value));
+            if (!Number.isFinite(hours) || hours < 1 || hours > 72) return;
+            setRoll(function (prev) { return { ...prev, backupHours: hours }; });
+            fetch('/lanyuxi/settings?backupHours=' + hours, { method: 'POST' }).catch(function () {});
           },
         }),
         h('span', null, '小时'),
         h('button', {
           className: 'btn ghost',
-          style: { padding: '4px 10px', fontSize: 12, color: roll.backupEnabled ? '#9fe0a0' : '#8899aa' },
+          style: { marginLeft: 'auto', padding: '4px 10px', fontSize: 12, color: roll.backupEnabled ? '#9fe0a0' : '#8899aa' },
           onClick: function () {
             const next = !roll.backupEnabled;
             setRoll(function (prev) { return { ...prev, backupEnabled: next }; });
             fetch('/lanyuxi/settings?backupEnabled=' + (next ? '1' : '0'), { method: 'POST' }).catch(function () {});
             lyxToast(next ? '自动备份已开启' : '自动备份已关闭（只保留换段与手动）');
           },
-        }, roll.backupEnabled ? '自动备份：开' : '自动备份：关'),
+        }, roll.backupEnabled ? '自动备份：开' : '自动备份：关'));
+      const rollRow2 = h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, width: '100%', marginTop: 8 } },
         h('button', {
           className: 'btn ghost',
           style: { padding: '4px 10px', fontSize: 12 },
-          title: '在资源管理器里打开备份文件夹',
           onClick: function () {
             fetch('/lanyuxi/open?target=backup').then(function (r) { return r.json(); }).then(function (d) {
               lyxToast(d && d.ok ? ('已打开：' + d.dir) : ('打不开：' + ((d && d.error) || '未知')));
             }).catch(function () { lyxToast('接口不可用'); });
           },
         }, '打开备份文件夹'),
+        h('span', { style: { marginLeft: 'auto', fontSize: 11.5, color: '#7f8ea3' } },
+          roll.limit ? ('第 ' + (roll.segment || 0) + ' 段 · 已用 ' + Math.round(roll.used / roll.limit * 100) + '%') : ''),
         h('button', {
           className: 'btn',
-          style: { marginLeft: 'auto', padding: '5px 14px', fontSize: 12, fontWeight: 600, color: '#fff', background: 'linear-gradient(140deg,#3f6fe0,#5b8cff)', border: '1px solid rgba(91,140,255,.6)', borderRadius: 8, cursor: 'pointer' },
+          style: { padding: '5px 14px', fontSize: 12, fontWeight: 600, color: '#fff', background: 'linear-gradient(140deg,#3f6fe0,#5b8cff)', border: '1px solid rgba(91,140,255,.6)', borderRadius: 8, cursor: 'pointer' },
           onClick: function () {
             lyxToast('正在备份…');
             fetch('/lanyuxi/backup', { method: 'POST' }).then(function (r) { return r.json(); }).then(function (d) {
               lyxToast(d && d.ok ? ('已备份 ' + d.copied + ' 个文件') : ('备份失败：' + ((d && d.error) || '未知')));
             }).catch(function () { lyxToast('备份失败：接口不可用'); });
           },
-        }, '立即备份'),
-        h('span', { style: { flexBasis: '100%', textAlign: 'right', marginTop: 2, fontSize: 11.5, color: '#7f8ea3' } },
-          roll.limit ? ('第 ' + (roll.segment || 0) + ' 段 · 已用 ' + Math.round(roll.used / roll.limit * 100) + '%') : ''));
+        }, '立即备份'));
+      const rollBar = h('div', { className: 'lyx-roll', style: { flexDirection: 'column', alignItems: 'stretch' } }, rollRow1, rollRow2);
 
       return h('div', { className: 'lyx-scope lyx-layout' },
         h('aside', { className: 'lyx-rail', dangerouslySetInnerHTML: { __html: NAV } }),
