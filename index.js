@@ -23,6 +23,7 @@ const DEFAULTS = {
   sessionCwd: "",
   cooldownMs: 300000,
   privateCooldownMs: 5000,
+  groupOutboundPerDay: 10,
   rolloverPercent: 50,
   contextWindowTokens: 1048576,
   charsPerToken: 1,
@@ -339,6 +340,36 @@ export function apply(ctx, rawConfig) {
   /** 每三天一个会话：第一次说话时创建，之后复用；跨桶自动换新会话。 */
   let systemSectionReady = false
 
+  // —— 守门员：出站内容比对「禁说清单」，命中就拒发 ——
+  function guardTerms() {
+    const raw = readPersonaFile("禁说清单.md")
+    if (!raw) return []
+    return raw.split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith("#") && !line.startsWith("（"))
+  }
+  function guardCheck(text) {
+    const body = String(text || "")
+    for (const term of guardTerms()) {
+      if (term && body.includes(term)) return term
+    }
+    return ""
+  }
+
+  const groupSent = { day: "", count: 0 }
+  function groupQuotaCheck() {
+    const today = ymd(new Date())
+    if (groupSent.day !== today) { groupSent.day = today; groupSent.count = 0 }
+    const limit = config.groupOutboundPerDay || 10
+    if (groupSent.count >= limit) return `今天在群里已经说了 ${groupSent.count} 句，到上限了`
+    return ""
+  }
+  function groupQuotaMark() {
+    const today = ymd(new Date())
+    if (groupSent.day !== today) { groupSent.day = today; groupSent.count = 0 }
+    groupSent.count += 1
+  }
+
   // —— 人格卡：读 lanyuxi-home\persona\ 下的 md，改了不用重启 ——
   const personaCache = new Map()
   function readPersonaFile(name) {
@@ -630,6 +661,17 @@ export function apply(ctx, rawConfig) {
       if (type === "private" && config.ownerQq && id !== config.ownerQq) throw new Error("只能私聊主人")
 
       const chatKey = type === "group" ? `group:${id}` : `private:${id}`
+      const hit = guardCheck(args.text)
+      if (hit) {
+        diag.guardBlocked = (diag.guardBlocked || 0) + 1
+        diag.guardLast = hit
+        logger.warn?.("[lanyuxi] 守门员拦下一条（命中：" + hit + "）")
+        throw new Error("这句话命中了禁说清单里的「" + hit + "」，发不出去。换个说法。")
+      }
+      if (type === "group") {
+        const over = groupQuotaCheck()
+        if (over) throw new Error(over + "（守门员按每日群发言上限拦下的）")
+      }
       const action = type === "group" ? "send_group_msg" : "send_private_msg"
       const params = type === "group" ? { group_id: Number(id), message: [{ type: "text", data: { text: args.text } }] } : { user_id: Number(id), message: [{ type: "text", data: { text: args.text } }] }
       const blocked = quota.check(chatKey)
@@ -643,6 +685,7 @@ export function apply(ctx, rawConfig) {
       }
       await request(action, params)
       quota.mark(chatKey)
+      if (type === "group") groupQuotaMark()
       lastActivityAt = Date.now()
       appendTranscript("蓝余汐", args.text)
       return `已发送到 ${chatKey}`
