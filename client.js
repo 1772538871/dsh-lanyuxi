@@ -630,7 +630,7 @@ window.__ModuleLoader__.load({
             }).catch(function () { lyxToast('备份失败：接口不可用'); });
           },
         }, '立即备份'),
-        h('span', { style: { marginLeft: 10, fontSize: 11.5, color: '#7f8ea3' } },
+        h('span', { style: { flexBasis: '100%', textAlign: 'right', marginTop: 2, fontSize: 11.5, color: '#7f8ea3' } },
           roll.limit ? ('第 ' + (roll.segment || 0) + ' 段 · 已用 ' + Math.round(roll.used / roll.limit * 100) + '%') : ''));
 
       return h('div', { className: 'lyx-scope lyx-layout' },
