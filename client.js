@@ -86,13 +86,13 @@ window.__ModuleLoader__.load({
     function LanyuxiSettings() {
       const [tab, setTab] = React.useState('platforms');
       const [scan, setScan] = React.useState(null);
-      const [roll, setRoll] = React.useState({ percent: 50, backupHours: 6, used: 0, limit: 0, segment: 0 });
+      const [roll, setRoll] = React.useState({ percent: 50, backupHours: 24, backupEnabled: true, used: 0, limit: 0, segment: 0 });
       React.useEffect(function () {
         let dead = false;
         function load() {
           fetch('/lanyuxi/settings', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
             if (!d || dead) return;
-            setRoll({ percent: d.rolloverPercent, backupHours: d.backupHours || 6, used: d.usedChars || 0, limit: d.limitChars || 0, segment: d.segment || 0 });
+            setRoll({ percent: d.rolloverPercent, backupHours: d.backupHours || 24, backupEnabled: d.backupEnabled !== false, used: d.usedChars || 0, limit: d.limitChars || 0, segment: d.segment || 0 });
           }).catch(function () {});
         }
         load();
@@ -788,6 +788,16 @@ window.__ModuleLoader__.load({
           },
         }),
         h('span', null, '小时'),
+        h('button', {
+          className: 'btn ghost',
+          style: { padding: '4px 10px', fontSize: 12, color: roll.backupEnabled ? '#9fe0a0' : '#8899aa' },
+          onClick: function () {
+            const next = !roll.backupEnabled;
+            setRoll(function (prev) { return { ...prev, backupEnabled: next }; });
+            fetch('/lanyuxi/settings?backupEnabled=' + (next ? '1' : '0'), { method: 'POST' }).catch(function () {});
+            lyxToast(next ? '自动备份已开启' : '自动备份已关闭（只保留换段与手动）');
+          },
+        }, roll.backupEnabled ? '自动备份：开' : '自动备份：关'),
         h('button', {
           className: 'btn',
           style: { marginLeft: 'auto', padding: '5px 14px', fontSize: 12, fontWeight: 600, color: '#fff', background: 'linear-gradient(140deg,#3f6fe0,#5b8cff)', border: '1px solid rgba(91,140,255,.6)', borderRadius: 8, cursor: 'pointer' },

@@ -378,12 +378,13 @@ export function apply(ctx, rawConfig) {
     }
   }
   const settingsPath = () => join(config.sessionCwd || process.cwd(), ".lanyuxi-settings.json")
-  const settings = { rolloverPercent: config.rolloverPercent || 50, backupHours: 6 }
+  const settings = { rolloverPercent: config.rolloverPercent || 50, backupHours: Number(config.backupHours ?? 24), backupEnabled: config.backupEnabled !== false }
   try {
     if (existsSync(settingsPath())) {
       const loaded = JSON.parse(readFileSync(settingsPath(), "utf8"))
       if (loaded && Number.isFinite(loaded.rolloverPercent)) settings.rolloverPercent = loaded.rolloverPercent
       if (loaded && Number.isFinite(loaded.backupHours)) settings.backupHours = loaded.backupHours
+      if (loaded && typeof loaded.backupEnabled === "boolean") settings.backupEnabled = loaded.backupEnabled
     }
   } catch {}
   function saveSettings() {
@@ -1480,6 +1481,11 @@ export function apply(ctx, rawConfig) {
               settings.rolloverPercent = Math.round(q)
               saveSettings()
             }
+            const en = url.searchParams.get("backupEnabled")
+            if (en === "1" || en === "0") {
+              settings.backupEnabled = en === "1"
+              saveSettings()
+            }
             const h = Number(url.searchParams.get("backupHours"))
             if (Number.isFinite(h) && h >= 1 && h <= 72) {
               settings.backupHours = Math.round(h)
@@ -1490,6 +1496,7 @@ export function apply(ctx, rawConfig) {
           return send(200, {
             rolloverPercent: settings.rolloverPercent,
             backupHours: settings.backupHours,
+            backupEnabled: settings.backupEnabled,
             contextWindowTokens: config.contextWindowTokens || 1048576,
             limitChars: currentLimit(),
             usedChars: cur ? cur.chars : 0,
@@ -1557,7 +1564,8 @@ export function apply(ctx, rawConfig) {
 
   ctx.effect(() => {
     const backupTimer = setInterval(() => {
-      const interval = (settings.backupHours || 6) * 60 * 60 * 1000
+      if (!settings.backupEnabled) return
+      const interval = (settings.backupHours || 24) * 60 * 60 * 1000
       if (Date.now() - lastBackupAt < interval) return
       const idle = !lastActivityAt || Date.now() - lastActivityAt > 12 * 60 * 60 * 1000
       if (idle) return

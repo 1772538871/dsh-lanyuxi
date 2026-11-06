@@ -13,6 +13,9 @@
         # 推荐 50：实测长上下文里，超过 50% 开始丢早期细节，70% 后容易忘约束，
         # 90% 附近明显变笨（答非所问、重复、忽略人设）。宁可早切，靠会话检索跨段回忆。
         rolloverPercent: 50
+        # 自动备份：默认每天一次；测试阶段可以关掉，只保留换段与手动备份
+        backupEnabled: true
+        backupHours: 24
         cooldownMs: 300000
         maxOutboundPerDay: 20
         groupOutboundPerDay: 10
