@@ -340,6 +340,85 @@ window.__ModuleLoader__.load({
         }
       }, [tab]);
 
+      React.useEffect(function () {
+        if (tab !== 'persona') return;
+        const root = document.querySelector('.lyx-scope #view-persona');
+        if (!root) return;
+        let dead = false;
+        function esc(s) {
+          return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+        function paintFixes(fixes) {
+          const card = Array.prototype.slice.call(root.querySelectorAll('.card')).filter(function (c) { return c.textContent.indexOf('纠正记录') >= 0; })[0];
+          if (!card) return;
+          const diary = card.querySelector('.diary');
+          if (!diary) return;
+          diary.innerHTML = (fixes && fixes.length)
+            ? fixes.map(function (x) { return '<div class="ditem"><span>「' + esc(x) + '」</span><span class="dt">生效中</span></div>'; }).join('')
+            : '<div class="ditem"><span>还没有纠正记录</span><span class="dt">—</span></div>';
+        }
+        function post(payload) {
+          return fetch('/lanyuxi/persona', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          }).then(function (r) { return r.json(); }).then(function (d) {
+            if (d && d.ok && d.card !== undefined) { const ta2 = root.querySelector('textarea'); if (ta2) ta2.value = d.card; }
+            if (d && d.ok) paintFixes(d.fixes);
+            return d;
+          });
+        }
+
+        const ta = root.querySelector('textarea');
+        const aliasRow = Array.prototype.slice.call(root.querySelectorAll('.row')).filter(function (r) { return r.textContent.indexOf('她怎么叫你') >= 0; })[0];
+        const aliasInput = aliasRow ? aliasRow.querySelector('input') : null;
+
+        Array.prototype.slice.call(root.querySelectorAll('button')).forEach(function (b) {
+          const label = b.textContent.trim();
+          if (label === '保存人格卡' || label === '只在这次会话生效') {
+            b.onclick = function () {
+              const value = ta ? ta.value : '';
+              b.disabled = true;
+              b.textContent = '保存中…';
+              post({ card: value }).then(function (d) {
+                b.disabled = false;
+                b.textContent = label;
+                lyxToast(d && d.ok ? '已保存，下一条消息生效' : '保存失败');
+              }).catch(function () { b.disabled = false; b.textContent = label; lyxToast('保存失败：接口不可用'); });
+            };
+          }
+          if (label === '加一条纠正') {
+            const card = b.parentElement;
+            const input = card ? card.querySelector('input[type=text]') : null;
+            b.onclick = function () {
+              const value = input ? input.value.trim() : '';
+              if (!value) { lyxToast('先写一句纠正'); return; }
+              post({ addFix: value }).then(function (d) {
+                if (d && d.ok && input) input.value = '';
+                lyxToast(d && d.ok ? '已记下，她会按这句改' : '没记上');
+              }).catch(function () { lyxToast('接口不可用'); });
+            };
+          }
+        });
+
+        fetch('/lanyuxi/persona', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) {
+          if (dead || !d) return;
+          if (ta) ta.value = d.card || '';
+          if (aliasInput) {
+            aliasInput.value = (d.aliases || []).join('，');
+            aliasInput.onchange = function () {
+              post({ aliases: aliasInput.value }).then(function (x) {
+                if (x && x.ok && x.aliases) aliasInput.value = x.aliases.join('，');
+                lyxToast(x && x.ok ? '已记住新的称呼' : '没保存上');
+              }).catch(function () { lyxToast('接口不可用'); });
+            };
+          }
+          paintFixes(d.fixes);
+        }).catch(function () {});
+
+        return function () { dead = true; };
+      }, [tab]);
+
       function savePercent(value) {
         const pct = Math.round(Number(value));
         if (!Number.isFinite(pct) || pct < 10 || pct > 90) return;

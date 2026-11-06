@@ -402,6 +402,27 @@ export function apply(ctx, rawConfig) {
       return ""
     }
   }
+  function personaFile(name) {
+    return join(config.homeDir || "E:\\dsh-foundry\\lanyuxi-home", "persona", name)
+  }
+  function writePersonaFile(name, text) {
+    const file = personaFile(name)
+    mkdirSync(dirname(file), { recursive: true })
+    writeFileSync(file, text, "utf8")
+    personaCache.delete(file)
+  }
+  function fixList() {
+    const raw = readPersonaFile("纠正清单.md") || ""
+    return raw.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.startsWith("- ")).map((l) => l.slice(2).trim()).filter(Boolean)
+  }
+  function addFix(text) {
+    const raw = readPersonaFile("纠正清单.md") || "# 纠正清单\n"
+    const line = "- " + String(text).replace(/\r?\n/g, " ").trim()
+    if (!line.slice(2)) return false
+    writePersonaFile("纠正清单.md", raw.replace(/\s*$/, "") + "\n" + line + "\n")
+    return true
+  }
+
   function personaText() {
     const card = readPersonaFile("人格卡.md")
     const fixes = readPersonaFile("纠正清单.md")
@@ -948,6 +969,26 @@ export function apply(ctx, rawConfig) {
           } catch (error) {
             return send(500, { ok: false, via: diag.via, error: String(error), lastError: diag.lastError })
           }
+        }
+        if (url.pathname === "/lanyuxi/persona") {
+          if (req.method === "POST") {
+            let body = ""
+            req.on("data", (chunk) => { body += chunk })
+            req.on("end", () => {
+              try {
+                const payload = body ? JSON.parse(body) : {}
+                if (typeof payload.card === "string") writePersonaFile("人格卡.md", payload.card)
+                if (typeof payload.aliases === "string") writePersonaFile("称呼.txt", payload.aliases)
+                if (typeof payload.addFix === "string") addFix(payload.addFix)
+                if (typeof payload.banned === "string") writePersonaFile("禁说清单.md", payload.banned)
+                send(200, { ok: true, card: readPersonaFile("人格卡.md"), fixes: fixList(), aliases: ownerAliases(), banned: guardTerms() })
+              } catch (error) {
+                send(500, { ok: false, error: String(error) })
+              }
+            })
+            return
+          }
+          return send(200, { card: readPersonaFile("人格卡.md"), fixes: fixList(), aliases: ownerAliases(), banned: guardTerms() })
         }
         if (url.pathname === "/lanyuxi/backup") {
           if (req.method === "POST") {
