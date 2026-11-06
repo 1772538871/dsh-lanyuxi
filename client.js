@@ -392,6 +392,7 @@ window.__ModuleLoader__.load({
           })[0];
         }
         function setText(el, text) { if (el) el.textContent = text; }
+        function load() {
         fetch('/lanyuxi/overview', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) {
           if (dead || !d) return;
 
@@ -450,7 +451,10 @@ window.__ModuleLoader__.load({
             });
           }
         }).catch(function () {});
-        return function () { dead = true; };
+        }
+        load();
+        const timer = setInterval(load, 10000);
+        return function () { dead = true; clearInterval(timer); };
       }, [tab]);
       React.useEffect(function () {
         if (tab !== 'guard') return;

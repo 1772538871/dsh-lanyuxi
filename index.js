@@ -205,7 +205,12 @@ export function apply(ctx, rawConfig) {
       timeLine + `【QQ · ${messageType === "group" ? "群聊" : "私聊"}】${who} 说：${text}`,
     ]
     if (!systemSectionReady) {
-      lines.push(`（收到消息请用 qq_send 回一句；当前会话 ${seg.id} 第 ${seg.segment} 段。）`)
+      const persona = personaText()
+      if (persona) lines.push(persona.slice(0, 6000))
+      lines.push(
+        `你是蓝余汐，正在 QQ 上跟${ownerLabel()}聊天。回话必须调用 qq_send，只在会话里说不调工具对方收不到。` +
+        `当前会话 ${seg.id} 第 ${seg.segment} 段；上一段是 ${prevId || "（无）"}。现在 ${stampNow()}。`
+      )
     }
     const prompt = lines.join("\n")
 
@@ -438,7 +443,7 @@ export function apply(ctx, rawConfig) {
   /** 把「在 QQ 上怎么回话」挂成系统提示段，不塞进用户消息里。 */
   function setupAgentPrompt(agentCtx) {
     try {
-      const sp = agentCtx && agentCtx.systemPrompt
+      const sp = agentCtx && (typeof agentCtx.get === "function" ? agentCtx.get("systemPrompt") : agentCtx.systemPrompt)
       if (!sp || typeof sp.section !== "function") return
       sp.section({
         name: "lanyuxi-persona",
