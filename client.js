@@ -354,6 +354,30 @@ window.__ModuleLoader__.load({
           const cards = Array.prototype.slice.call(root.querySelectorAll('.card'));
           return cards.filter(function (c) { const h = c.querySelector('h3'); return h && h.textContent.indexOf(kw) >= 0; })[0];
         }
+        function preview(kind, monthDay, fileName) {
+          const parts = String(monthDay).split('/')
+          const month = parts[0]
+          const name = parts[1] || fileName
+          fetch('/lanyuxi/diary?kind=' + encodeURIComponent(kind) + '&month=' + encodeURIComponent(month) + '&name=' + encodeURIComponent(name))
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+              if (!d || !d.ok) { lyxToast(d && d.error ? d.error : '读不到这篇'); return; }
+              let box = document.getElementById('lyx-diary-view');
+              if (!box) {
+                box = document.createElement('div');
+                box.id = 'lyx-diary-view';
+                box.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(6,10,18,.82);display:flex;align-items:center;justify-content:center;padding:40px';
+                box.onclick = function (e) { if (e.target === box) box.remove(); };
+                document.body.appendChild(box);
+              }
+              box.innerHTML = '<div style="max-width:640px;max-height:70vh;overflow:auto;background:#0f1520;border:1px solid rgba(91,140,255,.35);border-radius:14px;padding:20px 22px;color:#dfe7ff;font-size:14px;line-height:1.75;white-space:pre-wrap">' +
+                esc(d.content) +
+                '<div style="margin-top:14px;text-align:right"><button class="btn" id="lyx-diary-close">关闭</button></div></div>';
+              const btn = document.getElementById('lyx-diary-close');
+              if (btn) btn.onclick = function () { box.remove(); };
+            })
+            .catch(function () { lyxToast('接口不可用'); });
+        }
         function fillDiary(card, items, emptyText, tagger) {
           if (!card) return;
           const diary = card.querySelector('.diary');
@@ -363,8 +387,16 @@ window.__ModuleLoader__.load({
             return;
           }
           diary.innerHTML = items.map(function (it) {
-            return '<div class="ditem"><span>' + esc(it.name) + '</span><span class="dt">' + esc(tagger ? tagger(it) : '') + '</span></div>';
+            const label = String(it.name).indexOf('/') >= 0 ? String(it.name).split('/')[1] : String(it.name);
+            return '<div class="ditem" data-day="' + esc(it.name) + '" style="cursor:pointer"><span>' + esc(label) + '</span><span class="dt">' + esc(tagger ? tagger(it) : '') + '</span></div>';
           }).join('');
+          Array.prototype.slice.call(diary.querySelectorAll('.ditem[data-day]')).forEach(function (row) {
+            row.onclick = function () {
+              const raw = row.getAttribute('data-day');
+              const kind = card.querySelector('h3').textContent.indexOf('表日记') >= 0 ? 'to-owner' : 'private';
+              preview(kind, raw, raw);
+            };
+          });
         }
         fetch('/lanyuxi/assets', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) {
           if (dead || !d) return;
@@ -383,6 +415,22 @@ window.__ModuleLoader__.load({
           }
           fillDiary(cardBy('图片'), (d.images || []).map(function (x) { return { name: x.name, mtime: x.mtime }; }), '图片库还是空的', function (x) { return fmtDay(x.mtime); });
           fillDiary(cardBy('表日记'), (d.diary && d.diary.toOwner) || [], '还没写过表日记', function (x) { return fmtDay(x.mtime); });
+          const writeCard = cardBy('表日记');
+          if (writeCard) {
+            Array.prototype.slice.call(writeCard.querySelectorAll('button')).forEach(function (b) {
+              if (b.textContent.indexOf('发一篇') < 0) return;
+              b.onclick = function () {
+                b.disabled = true;
+                const label = b.textContent;
+                b.textContent = '让她写…';
+                fetch('/lanyuxi/diary/write', { method: 'POST' }).then(function (r) { return r.json(); }).then(function (x) {
+                  b.disabled = false;
+                  b.textContent = label;
+                  lyxToast(x && x.ok ? '已让她写今天的日记，几十秒后再刷新看看' : ('没写成：' + ((x && x.error) || '未知')));
+                }).catch(function () { b.disabled = false; b.textContent = label; lyxToast('接口不可用'); });
+              };
+            });
+          }
           fillDiary(cardBy('里日记'), (d.diary && d.diary.private) || [], '还没写过里日记', function (x) { return fmtDay(x.mtime); });
         }).catch(function () {});
         return function () { dead = true; };

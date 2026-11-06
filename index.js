@@ -1048,6 +1048,43 @@ export function apply(ctx, rawConfig) {
             return send(500, { ok: false, via: diag.via, error: String(error), lastError: diag.lastError })
           }
         }
+        if (url.pathname === "/lanyuxi/diary") {
+          const kind = url.searchParams.get("kind") || ""
+          const month = url.searchParams.get("month") || ""
+          const name = url.searchParams.get("name") || ""
+          const kinds = { "to-owner": "to-owner", private: "private" }
+          if (!kinds[kind] || !/^\d{4}-\d{2}$/.test(month) || !/^[\w\u4e00-\u9fa5.\- ]+\.md$/.test(name)) {
+            return send(400, { ok: false, error: "参数不合法" })
+          }
+          const file = join(config.homeDir || "E:\\dsh-foundry\\lanyuxi-home", "diary", kinds[kind], month, name)
+          if (!existsSync(file)) return send(404, { ok: false, error: "这篇还没写" })
+          const content = readFileSync(file, "utf8")
+          return send(200, { ok: true, content: content.slice(0, 20000) })
+        }
+        if (url.pathname === "/lanyuxi/diary/write") {
+          if (req.method !== "POST") return send(405, { ok: false })
+          try {
+            sessionState.lastDiaryDay = ""
+            saveSessionState()
+            const base = config.homeDir || "E:\\dsh-foundry\\lanyuxi-home"
+            const now = new Date()
+            const month = now.getFullYear() + "-" + z2(now.getMonth() + 1)
+            const day = ymd(now)
+            const week = "日一二三四五六"[now.getDay()]
+            const text = [
+              `【补写今天的日记】现在写两篇，都写到 ${base}\\diary\\ 下：`,
+              `1) 表日记：${base}\\diary\\to-owner\\${month}\\${day}.md（给主人看，小学生作文，200 字内）`,
+              `2) 里日记：${base}\\diary\\private\\${month}\\${day}.md（只给自己看）`,
+              `第一行原样：${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 星期${week} 天气：（晴/多云 + 热/凉快/冷） 心情：（一个词）`,
+              `空一行再写正文，自由发挥；写好后只回复「写好了」，不要贴日记内容。`,
+            ].join("\n")
+            const seg = segmentInfo(0)
+            await deliver(text, seg.id)
+            return send(200, { ok: true, sessionId: seg.id })
+          } catch (error) {
+            return send(500, { ok: false, error: String(error) })
+          }
+        }
         if (url.pathname === "/lanyuxi/assets") {
           const home = config.homeDir || "E:\\dsh-foundry\\lanyuxi-home"
           const listDir = (dir) => {
