@@ -774,7 +774,7 @@ window.__ModuleLoader__.load({
           onKeyDown: function (e) { if (e.key === 'Enter') savePercent(e.target.value); },
         }),
         h('span', null, '% 就开新一段'),
-        h('span', { style: { width: 10 } }),
+        h('span', { style: { marginLeft: 'auto' } }),
         h('span', null, '备份间隔'),
         h('input', {
           type: 'number', min: 1, max: 72, step: 1,
@@ -791,7 +791,7 @@ window.__ModuleLoader__.load({
         h('span', null, '小时'),
         h('button', {
           className: 'btn ghost',
-          style: { marginLeft: 'auto', padding: '4px 10px', fontSize: 12, color: roll.backupEnabled ? '#9fe0a0' : '#8899aa' },
+          style: { marginLeft: 10, padding: '4px 10px', fontSize: 12, color: roll.backupEnabled ? '#9fe0a0' : '#8899aa' },
           onClick: function () {
             const next = !roll.backupEnabled;
             setRoll(function (prev) { return { ...prev, backupEnabled: next }; });
