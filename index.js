@@ -1054,6 +1054,7 @@ export function apply(ctx, rawConfig) {
           return send(200, {
             connected, verified, selfId, selfNickname, ownerQq: config.ownerQq,
             mood: moodLine(),
+            allowGroups: config.allowGroups || [],
             muted: muted(), socialPaused: Boolean(brakes.socialPaused), biliPaused: Boolean(brakes.biliPaused),
             todaySent: sentToday || quota.count,
             sentToday,
