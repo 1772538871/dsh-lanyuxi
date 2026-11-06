@@ -167,6 +167,23 @@ export function apply(ctx, rawConfig) {
     const atMe = segments.some((s) => s?.type === "at" && String(s?.data?.qq) === selfId)
     let text = segments.filter((s) => s?.type === "text").map((s) => s?.data?.text ?? "").join("").trim()
     if (!text && typeof event.raw_message === "string") text = event.raw_message.trim()
+    if (!text) { diag.droppedEmpty += 1; return }
+
+    if (messageType === "group") {
+      if (!config.allowGroups.includes(groupId)) { diag.droppedGroup += 1; return }
+      const speaker = event.sender?.card || event.sender?.nickname || String(userId)
+      if (text) pushGroupMessage(groupId, speaker, text)
+      rememberGroupName(groupId)
+      const free = config.freeGroups.includes(groupId)
+      if (!free && !atMe) { diag.droppedGroup += 1; return }
+    } else if (messageType === "private") {
+      if (config.ownerQq && userId !== config.ownerQq) { diag.droppedPrivate += 1; return }
+    } else {
+      return
+    }
+
+    if (remember(event.message_id)) { diag.duplicates += 1; return }
+
     // 图片：下载到她的图片库，再把本地路径告诉她，她可以用 read_image 看
     const imageSegs = segments.filter((s) => s?.type === "image")
     if (imageSegs.length) {
@@ -206,20 +223,6 @@ export function apply(ctx, rawConfig) {
         text = (text ? text + "\n" : "") + "（对方发了一张图，但没下载下来，你只看到一条图片提示。）"
       }
     }
-    if (!text) { diag.droppedEmpty += 1; return }
-
-    if (messageType === "group") {
-      if (!config.allowGroups.includes(groupId)) { diag.droppedGroup += 1; return }
-      const free = config.freeGroups.includes(groupId)
-      if (!free && !atMe) { diag.droppedGroup += 1; return }
-    } else if (messageType === "private") {
-      if (config.ownerQq && userId !== config.ownerQq) { diag.droppedPrivate += 1; return }
-    } else {
-      return
-    }
-
-    if (remember(event.message_id)) { diag.duplicates += 1; return }
-
     const chatKey = chatKeyOf(messageType, groupId, userId)
     lastChat = { messageType, groupId, userId, chatKey }
 
@@ -268,9 +271,12 @@ export function apply(ctx, rawConfig) {
     const timeLine = seg.newDay
       ? `【现在是 ${stampNow(clock)}】`
       : `【${z2(clock.getHours())}:${z2(clock.getMinutes())}】`
+    const gname = messageType === "group" ? groupNames.get(groupId) || "" : ""
+    const gctx = messageType === "group" ? groupContext(groupId) : ""
     const lines = [
-      timeLine + `【QQ · ${messageType === "group" ? "群聊" : "私聊"}】${who} 说：${text}`,
+      timeLine + `【QQ · ${messageType === "group" ? ("群聊" + (gname ? "「" + gname + "」" : "") ) : "私聊"}】${who} 说：${text}`,
     ]
+    if (gctx) lines.push(`（群里刚刚在聊：\n${gctx}\n 你只接被叫到的那句，别把别人的私事往外说。）`)
     if (wonder.lastSentAt && !wonder.repliedAt) {
       const mins = Math.round((Date.now() - wonder.lastSentAt) / 60000)
       if (mins >= 30) lines.push(`（你上次跟他说话是 ${mins} 分钟前，他到现在没回。怎么想随你，不用勉强自己找理由。）`)
@@ -1050,6 +1056,28 @@ export function apply(ctx, rawConfig) {
       return "已收藏到 " + dest + "。想用就调用 qq_send 并把 image 填成这个路径。"
     },
   })
+
+  // —— 群聊上下文：她在群里不只听被 @ 的那一句，还记得刚聊了什么 ——
+  const groupBuffer = new Map()
+  const groupNames = new Map()
+  function pushGroupMessage(gid, who, text) {
+    if (!groupBuffer.has(gid)) groupBuffer.set(gid, [])
+    const list = groupBuffer.get(gid)
+    list.push({ who, text: String(text).slice(0, 120), at: Date.now() })
+    if (list.length > 20) list.splice(0, list.length - 20)
+  }
+  function groupContext(gid) {
+    const list = groupBuffer.get(gid) || []
+    if (!list.length) return ""
+    return list.slice(-10).map((m) => m.who + "：" + m.text).join("\n")
+  }
+  function rememberGroupName(gid) {
+    if (groupNames.has(gid)) return
+    groupNames.set(gid, "")
+    request("get_group_info", { group_id: Number(gid) })
+      .then((info) => { groupNames.set(gid, String(info?.group_name ?? "")) })
+      .catch(() => {})
+  }
 
   // —— 她发了消息没人回：自己琢磨一下，但不许连环追问 ——
   const wonderPath = () => join(config.sessionCwd || process.cwd(), ".lanyuxi-wonder.json")
