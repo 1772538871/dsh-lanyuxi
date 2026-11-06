@@ -638,7 +638,7 @@ window.__ModuleLoader__.load({
       return h('div', { className: 'lyx-scope lyx-layout' },
         h('aside', { className: 'lyx-rail', dangerouslySetInnerHTML: { __html: NAV } }),
         h('div', { className: 'lyx-main' },
-          rollBar,
+          tab === 'overview' ? rollBar : null,
           notice,
           h('div', { dangerouslySetInnerHTML: { __html: VIEWS[tab] || '' } })),
         modal);
