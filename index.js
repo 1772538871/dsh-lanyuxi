@@ -187,6 +187,7 @@ export function apply(ctx, rawConfig) {
       : "主人"
     const seg = segmentInfo(text.length)
     const prevId = (sessionState.current && sessionState.current.prevId) || ""
+    lastActivityAt = Date.now()
     appendTranscript(messageType === "group" ? ("群" + groupId + " " + who) : "主人", text)
     try { await ensureAgentForBucket(seg.id) } catch {}
     const fresh = Boolean(diag.freshSession)
@@ -572,6 +573,7 @@ export function apply(ctx, rawConfig) {
       }
       await request(action, params)
       quota.mark(chatKey)
+      lastActivityAt = Date.now()
       appendTranscript("蓝余汐", args.text)
       return `已发送到 ${chatKey}`
     },
@@ -623,6 +625,27 @@ export function apply(ctx, rawConfig) {
   function backupRoot() {
     return join(config.sessionCwd || process.cwd(), "backup")
   }
+  let lastActivityAt = 0
+  let lastBackupAt = 0
+
+  /** 会话目录在 since 之后有没有新写入。 */
+  function sessionsChangedSince(since) {
+    try {
+      const root = sessionsRoot()
+      if (!existsSync(root)) return false
+      const stack = [root]
+      while (stack.length) {
+        const dir = stack.pop()
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          const p = join(dir, entry.name)
+          if (entry.isDirectory()) { stack.push(p); continue }
+          if (statSync(p).mtimeMs > since) return true
+        }
+      }
+    } catch {}
+    return false
+  }
+
   function backupSessions(reason = "auto") {
     try {
       const src = sessionsRoot()
@@ -660,7 +683,8 @@ export function apply(ctx, rawConfig) {
           rmdirSync(join(backupRoot(), old))
         } catch {}
       }
-      diag.lastBackup = { at: Date.now(), dir, copied, reason }
+      lastBackupAt = Date.now()
+      diag.lastBackup = { at: lastBackupAt, dir, copied, reason }
       logger.info?.("[lanyuxi] 会话已备份 " + copied + " 个文件 -> " + dir)
       return { ok: true, dir, copied }
     } catch (error) {
@@ -869,7 +893,12 @@ export function apply(ctx, rawConfig) {
   })
 
   ctx.effect(() => {
-    const backupTimer = setInterval(() => backupSessions("scheduled"), 6 * 60 * 60 * 1000)
+    const backupTimer = setInterval(() => {
+      const idle = !lastActivityAt || Date.now() - lastActivityAt > 12 * 60 * 60 * 1000
+      if (idle) return
+      if (!sessionsChangedSince(lastBackupAt)) return
+      backupSessions("scheduled")
+    }, 6 * 60 * 60 * 1000)
     return () => clearInterval(backupTimer)
   }, "lanyuxi: 会话备份")
 
