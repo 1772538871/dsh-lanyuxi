@@ -381,7 +381,9 @@ export function apply(ctx, rawConfig) {
     if (!cur.titleBase) cur.titleBase = String(sample).replace(/\s+/g, " ").trim().slice(0, 12) || "聊天"
     const signature = cur.id + "|" + cur.lastDay
     if (titledSignature === signature) return
-    const title = cur.titleBase + "—" + md(dayOf(cur.firstDay)) + "到" + md(dayOf(cur.lastDay))
+    const from = md(dayOf(cur.firstDay))
+    const to = md(dayOf(cur.lastDay))
+    const title = cur.titleBase + "—" + (from === to ? from : (from + "到" + to))
     try {
       const st = ctx.get("sessionTitle")
       const agents = ctx.get("agents")
