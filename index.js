@@ -189,6 +189,26 @@ export function apply(ctx, rawConfig) {
       : ownerLabel()
     if (muted()) { diag.mutedSkip = (diag.mutedSkip || 0) + 1; return }
     if (brakes.socialPaused && messageType === "group") { diag.socialSkip = (diag.socialSkip || 0) + 1; return }
+    // —— 每日日记：新的一天第一次说话时，让她把昨天写下来 ——
+    const diaryKey = ymd(new Date())
+    let diaryTask = ""
+    if (sessionState.lastDiaryDay !== diaryKey) {
+      const prev = sessionState.lastDiaryDay
+      sessionState.lastDiaryDay = diaryKey
+      saveSessionState()
+      if (prev) {
+        const d = new Date()
+        const month = d.getFullYear() + "-" + z2(d.getMonth() + 1)
+        const dayName = diaryKey
+        const base = config.homeDir || "E:\\dsh-foundry\\lanyuxi-home"
+        diaryTask = [
+          `【今天的第一件事】现在先写日记，写两篇，都写到 ${base}\\diary\\ 下：`,
+          `1) 表日记：${base}\\diary\\to-owner\\${month}\\${dayName}.md —— 给主人看的，小学生作文口吻，200 字以内，写昨天跟他说了什么、他哪句话惹你笑了或气到你了。`,
+          `2) 里日记：${base}\\diary\\private\\${month}\\${dayName}.md —— 只给自己看，可以嘴硬、可以承认在意，别写给外人看。`,
+          `写完再回这条消息；日记内容不要贴回 QQ。`,
+        ].join("\n")
+      }
+    }
     const seg = segmentInfo(text.length)
     const prevId = (sessionState.current && sessionState.current.prevId) || ""
     lastActivityAt = Date.now()
@@ -204,6 +224,7 @@ export function apply(ctx, rawConfig) {
     const lines = [
       timeLine + `【QQ · ${messageType === "group" ? "群聊" : "私聊"}】${who} 说：${text}`,
     ]
+    if (diaryTask) lines.push(diaryTask)
     if (!systemSectionReady) {
       const persona = personaText()
       if (persona) lines.push(persona.slice(0, 6000))
@@ -276,6 +297,9 @@ export function apply(ctx, rawConfig) {
   try {
     if (existsSync(sessionStatePath())) sessionState = JSON.parse(readFileSync(sessionStatePath(), "utf8"))
   } catch {}
+  if (!sessionState || typeof sessionState !== "object") sessionState = {}
+  if (typeof sessionState.seq !== "number") sessionState.seq = 0
+  if (typeof sessionState.lastDiaryDay !== "string") sessionState.lastDiaryDay = ""
   function saveSessionState() {
     try {
       mkdirSync(config.sessionCwd || process.cwd(), { recursive: true })
