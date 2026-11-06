@@ -189,6 +189,28 @@ export function apply(ctx, rawConfig) {
       : ownerLabel()
     if (muted()) { diag.mutedSkip = (diag.mutedSkip || 0) + 1; return }
     if (brakes.socialPaused && messageType === "group") { diag.socialSkip = (diag.socialSkip || 0) + 1; return }
+    // —— 天气：配了城市就查真实天气，没配就让她按季节写个合理的 ——
+    async function todayWeather() {
+      const city = config.weatherCity
+      if (!city) return ""
+      try {
+        const geo = await fetch("https://geocoding-api.open-meteo.com/v1/search?count=1&language=zh&name=" + encodeURIComponent(city))
+        const gj = await geo.json()
+        const spot = gj && gj.results && gj.results[0]
+        if (!spot) return ""
+        const url = "https://api.open-meteo.com/v1/forecast?current=temperature_2m,weather_code&timezone=auto&latitude=" + spot.latitude + "&longitude=" + spot.longitude
+        const res = await fetch(url)
+        const wj = await res.json()
+        const cur = wj && wj.current
+        if (!cur) return ""
+        const map = { 0: "晴", 1: "晴", 2: "多云", 3: "阴", 45: "雾", 48: "雾", 51: "小雨", 53: "小雨", 55: "雨", 61: "小雨", 63: "雨", 65: "大雨", 71: "雪", 73: "雪", 75: "大雪", 80: "阵雨", 81: "阵雨", 82: "暴雨", 95: "雷阵雨", 96: "雷阵雨", 99: "雷阵雨" }
+        const label = map[cur.weather_code] || "多云"
+        return label + " " + Math.round(cur.temperature_2m) + "°C"
+      } catch {
+        return ""
+      }
+    }
+
     // —— 每日日记：新的一天第一次说话时，让她把昨天写下来 ——
     const diaryKey = ymd(new Date())
     let diaryTask = ""
@@ -201,10 +223,17 @@ export function apply(ctx, rawConfig) {
         const month = d.getFullYear() + "-" + z2(d.getMonth() + 1)
         const dayName = diaryKey
         const base = config.homeDir || "E:\\dsh-foundry\\lanyuxi-home"
+        const w = await todayWeather()
+        const now2 = new Date()
+        const week = "日一二三四五六"[now2.getDay()]
+        const head = `${now2.getFullYear()}年${now2.getMonth() + 1}月${now2.getDate()}日 星期${week} 天气：${w || "（你自己挑一个，晴/多云/阴 都行）"}`
         diaryTask = [
           `【今天的第一件事】现在先写日记，写两篇，都写到 ${base}\\diary\\ 下：`,
-          `1) 表日记：${base}\\diary\\to-owner\\${month}\\${dayName}.md —— 给主人看的，小学生作文口吻，200 字以内，写昨天跟他说了什么、他哪句话惹你笑了或气到你了。`,
-          `2) 里日记：${base}\\diary\\private\\${month}\\${dayName}.md —— 只给自己看，可以嘴硬、可以承认在意，别写给外人看。`,
+          `1) 表日记：${base}\\diary\\to-owner\\${month}\\${dayName}.md —— 给主人看的小学生作文，200 字以内。`,
+          `2) 里日记：${base}\\diary\\private\\${month}\\${dayName}.md —— 只给自己看，可以嘴硬、可以承认在意。`,
+          `两篇的第一行都必须原样是这一行（日期/星期/天气）：`,
+          head,
+          `第二行空一行，然后正文用「今天」开头，写昨天跟他说了什么、他哪句话惹你笑了或气到你了。`,
           `写完再回这条消息；日记内容不要贴回 QQ。`,
         ].join("\n")
       }
