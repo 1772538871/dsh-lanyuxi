@@ -203,7 +203,7 @@ export function apply(ctx, rawConfig) {
         const base = config.homeDir || "E:\\dsh-foundry\\lanyuxi-home"
         const now2 = new Date()
         const week = "日一二三四五六"[now2.getDay()]
-        const head = `${now2.getFullYear()}年${now2.getMonth() + 1}月${now2.getDate()}日 星期${week} 天气：${"（自己写，晴/多云 + 热/凉快/冷）"} ${moodPhrase()}`
+        const head = `${now2.getFullYear()}年${now2.getMonth() + 1}月${now2.getDate()}日 星期${week} 天气：${"（自己写，晴/多云 + 热/凉快/冷）"} 心情${"（自己写，如 心情一般 / 心情很烦，不要「心情：」）"}`
         diaryTask = [
           `【今天的第一件事】现在先写日记，写两篇，都写到 ${base}\\diary\\ 下：`,
           `1) 表日记：${base}\\diary\\to-owner\\${month}\\${dayName}.md —— 给主人看的小学生作文，200 字以内。`,
@@ -517,7 +517,7 @@ export function apply(ctx, rawConfig) {
           if (cur) lines.push(`当前会话 ${id}（第 ${sessionState.seq || 1} 段）。`)
           if (prev) lines.push(`上一段会话的 id 是 ${prev}；主人提到以前的事，先用会话检索去查那个 id 再回答。`)
           else lines.push("这是第一段会话，没有更早的记录。")
-          lines.push(`现在时间：${stampNow()}；${moodPhrase()}（好感 ${mood.affection}/100）。顺着这个情绪说话，别突然变热情也别无缘无故发火。`)
+          lines.push(`现在时间：${stampNow()}。${moodHint()}`)
           return lines.join("\n")
         },
       })
@@ -870,6 +870,7 @@ export function apply(ctx, rawConfig) {
     mood.lastTouch = Date.now()
     if (before !== mood.affection) saveMood()
   }
+  /** 她心里的状态，只说成"感觉"，永远不报分数。 */
   function moodPhrase() {
     const a = mood.affection
     if (a >= 85) return "心情特别好"
@@ -878,6 +879,16 @@ export function apply(ctx, rawConfig) {
     if (a >= 30) return "心情有点烦"
     if (a >= 15) return "心情很烦"
     return "心情差到不想说话"
+  }
+  /** 给模型的私下感受，不带任何数字。 */
+  function moodHint() {
+    const a = mood.affection
+    if (a >= 85) return "你现在挺高兴的，话会多一点，也愿意先开口。"
+    if (a >= 70) return "你现在心情不错，愿意接话，偶尔会主动关心他一句。"
+    if (a >= 50) return "你现在说不上好也说不上坏，正常聊，不会格外热络。"
+    if (a >= 30) return "你现在有点闷，话短，不太想解释太多。"
+    if (a >= 15) return "你现在挺烦的，回得短、带点刺，但不至于不理人。"
+    return "你现在心情很差，能少说就少说；他要是没做错什么，你也别发火，只是不想热络。"
   }
   /** 长时间没人理她会掉心情；一次最多掉 12，避免醒来就翻脸。 */
   function moodDecay() {
@@ -1136,7 +1147,7 @@ export function apply(ctx, rawConfig) {
             const v = Number(url.searchParams.get("affection"))
             if (Number.isFinite(v) && v >= 0 && v <= 100) { mood.affection = Math.round(v); mood.lastTouch = Date.now(); saveMood() }
           }
-          return send(200, { affection: mood.affection, phrase: moodPhrase(), lastReason: mood.lastReason, lastTouch: mood.lastTouch })
+          return send(200, { phrase: moodPhrase(), lastReason: mood.lastReason, lastTouch: mood.lastTouch })
         }
         if (url.pathname === "/lanyuxi/assets") {
           const home = config.homeDir || "E:\\dsh-foundry\\lanyuxi-home"
