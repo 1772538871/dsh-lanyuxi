@@ -370,6 +370,8 @@ window.__ModuleLoader__.load({
             pav.appendChild(img);
             if (badge) pav.appendChild(badge);
           }
+          const chips1 = qqCard.querySelector('.gchips');
+          if (chips1) chips1.style.display = 'none';
           const sub = qqCard.querySelector('.sub');
           if (sub) {
             const groups = (d.allowGroups || []).length;
@@ -429,6 +431,8 @@ window.__ModuleLoader__.load({
               if (badge) pav.appendChild(badge);
             }
             setText(qqCard.querySelector('.sub'), '今日发言 ' + (d.sentToday || 0) + ' 条');
+            const chips0 = qqCard.querySelector('.gchips');
+            if (chips0) chips0.style.display = 'none';
           }
 
           const timeline = cardBy('她今天怎么过的');
@@ -618,7 +622,7 @@ window.__ModuleLoader__.load({
         h('span', null, '小时'),
         h('button', {
           className: 'btn',
-          style: { padding: '5px 14px', fontSize: 12, fontWeight: 600, color: '#fff', background: 'linear-gradient(140deg,#3f6fe0,#5b8cff)', border: '1px solid rgba(91,140,255,.6)', borderRadius: 8, cursor: 'pointer' },
+          style: { marginLeft: 'auto', padding: '5px 14px', fontSize: 12, fontWeight: 600, color: '#fff', background: 'linear-gradient(140deg,#3f6fe0,#5b8cff)', border: '1px solid rgba(91,140,255,.6)', borderRadius: 8, cursor: 'pointer' },
           onClick: function () {
             lyxToast('正在备份…');
             fetch('/lanyuxi/backup', { method: 'POST' }).then(function (r) { return r.json(); }).then(function (d) {
@@ -626,7 +630,7 @@ window.__ModuleLoader__.load({
             }).catch(function () { lyxToast('备份失败：接口不可用'); });
           },
         }, '立即备份'),
-        h('span', { style: { marginLeft: 'auto', fontSize: 11.5, color: '#7f8ea3' } },
+        h('span', { style: { marginLeft: 10, fontSize: 11.5, color: '#7f8ea3' } },
           roll.limit ? ('第 ' + (roll.segment || 0) + ' 段 · 已用 ' + Math.round(roll.used / roll.limit * 100) + '%') : ''));
 
       return h('div', { className: 'lyx-scope lyx-layout' },
