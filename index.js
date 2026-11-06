@@ -1148,9 +1148,11 @@ export function apply(ctx, rawConfig) {
     const ref = config.gptSovitsRef || join(home, "voice", "ref.wav")
     if (!existsSync(ref)) throw new Error("还没有参考音频：" + ref + "（放一段主人的声音进去）")
     const url = api.replace(/\/$/, "") + "/tts?text=" + encodeURIComponent(text) +
-      "&text_lang=zh&ref_audio_path=" + encodeURIComponent(ref) +
-      "&prompt_lang=zh&prompt_text=" + encodeURIComponent(config.gptSovitsPrompt || "") +
-      "&emotion=" + encodeURIComponent(emotion) + "&media_type=wav"
+      "&text_lang=" + encodeURIComponent(config.gptSovitsTextLang || "zh") +
+      "&ref_audio_path=" + encodeURIComponent(ref) +
+      "&prompt_lang=" + encodeURIComponent(config.gptSovitsPromptLang || "ja") +
+      "&prompt_text=" + encodeURIComponent(config.gptSovitsPrompt || "") +
+      "&media_type=wav"
     const res = await fetch(url)
     if (!res.ok) throw new Error("语音合成失败 HTTP " + res.status)
     const buf = Buffer.from(await res.arrayBuffer())

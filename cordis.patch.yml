@@ -21,5 +21,10 @@
         groupOutboundPerDay: 10
         # 语音（M4）：装好 GPT-SoVITS 后把 voiceEnabled 改 true，API 默认 http://127.0.0.1:9880
         voiceEnabled: false
+        # 参考音频与文本（宫园薰切片，日语提示 + 中文合成，跨语种）
+        gptSovitsRef: E:\dsh-foundry\lanyuxi-home\voice\ref.wav
+        gptSovitsPrompt: 君はひどい奴です。グズ、ノロマ、アンポントン。
+        gptSovitsPromptLang: ja
+        gptSovitsTextLang: zh
         gptSovitsApi: http://127.0.0.1:9880
         gptSovitsDir: E:\GPT-SoVITS
