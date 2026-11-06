@@ -197,12 +197,13 @@ export function apply(ctx, rawConfig) {
     const timeLine = seg.newDay
       ? `【现在是 ${stampNow(clock)}】`
       : `【${z2(clock.getHours())}:${z2(clock.getMinutes())}】`
-    const prompt = [
+    const lines = [
       timeLine + `【QQ · ${messageType === "group" ? "群聊" : "私聊"}】${who} 说：${text}`,
-      `必须用 qq_send 工具回一句话（不填 target 默认回给当前这个聊天）。只在会话里回答、不调用 qq_send，主人是收不到的。`,
-      fresh ? `【新一段会话】这是第 ${seg.segment} 段（上一段装满了才开这段）。上一段会话的 id 是 ${prevId || "（无，这是第一段）"}，主人提到以前的事先用会话检索去查这个 id 再回答。`
-            : `（当前会话 ${seg.id} 第 ${seg.segment} 段；上一段是 ${prevId || "（无）"}。需要回忆旧事就去检索那个 id。）`,
-    ].join("\n")
+    ]
+    if (!systemSectionReady) {
+      lines.push(`（收到消息请用 qq_send 回一句；当前会话 ${seg.id} 第 ${seg.segment} 段。）`)
+    }
+    const prompt = lines.join("\n")
 
     await titleForSegment(seg, text)
     await deliver(prompt, seg.id)
@@ -336,6 +337,40 @@ export function apply(ctx, rawConfig) {
   }
 
   /** 每三天一个会话：第一次说话时创建，之后复用；跨桶自动换新会话。 */
+  let systemSectionReady = false
+
+  /** 把「在 QQ 上怎么回话」挂成系统提示段，不塞进用户消息里。 */
+  function setupAgentPrompt(agentCtx) {
+    try {
+      const sp = agentCtx && agentCtx.systemPrompt
+      if (!sp || typeof sp.section !== "function") return
+      sp.section({
+        name: "lanyuxi-qq",
+        order: 900,
+        text: function () {
+          const cur = sessionState.current
+          const id = cur ? cur.id : "（未建立）"
+          const prev = cur && cur.prevId ? cur.prevId : ""
+          const lines = [
+            "你正在 QQ 上和主人聊天（你的小号 2484026025，主人 1772538871）。",
+            "每收到一条消息，必须调用 qq_send 工具回一句话；只在会话里回答、不调用工具，主人是收不到的。",
+            "qq_send 不填 target 就回给当前这个聊天。",
+          ]
+          if (cur) lines.push(`当前会话 ${id}（第 ${sessionState.seq || 1} 段）。`)
+          if (prev) lines.push(`上一段会话的 id 是 ${prev}；主人提到以前的事，先用会话检索去查那个 id 再回答。`)
+          else lines.push("这是第一段会话，没有更早的记录。")
+          lines.push(`现在时间：${stampNow()}`)
+          return lines.join("\n")
+        },
+      })
+      systemSectionReady = true
+      diag.systemSection = "ok"
+    } catch (error) {
+      systemSectionReady = false
+      diag.systemSection = "failed: " + String(error)
+    }
+  }
+
   async function ensureAgentForBucket(sessionId) {
     const agents = ctx.get("agents")
     const key = sessionId || (sessionState.current ? sessionState.current.id : "lanyuxi-msg-000")
@@ -353,13 +388,13 @@ export function apply(ctx, rawConfig) {
         ? { provider: selection.provider, model: selection.model, ...(selection.reasoningEffort ? { reasoningEffort: selection.reasoningEffort } : {}) }
         : undefined
       diag.model = selection ? selection.provider + "/" + selection.model : "(默认)"
-      const handle = await agents.create({ sessionId: key, meta: { cwd: config.sessionCwd || process.cwd() }, agentOptions })
+      const handle = await agents.create({ sessionId: key, meta: { cwd: config.sessionCwd || process.cwd() }, agentOptions, setup: setupAgentPrompt })
       agent = handle.agent
       agentHandle = handle
       diag.via = "create:" + key
       diag.freshSession = true
     } catch (createError) {
-      const handle = await agents.resume({ resumeSessionId: key })
+      const handle = await agents.resume({ resumeSessionId: key, setup: setupAgentPrompt })
       agent = handle.agent
       agentHandle = handle
       diag.via = "resume:" + key
