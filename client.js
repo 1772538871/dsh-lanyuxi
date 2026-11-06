@@ -373,8 +373,8 @@ window.__ModuleLoader__.load({
         }),
         h('span', null, '小时'),
         h('button', {
-          className: 'btn ghost',
-          style: { padding: '4px 10px', fontSize: 12 },
+          className: 'btn',
+          style: { padding: '5px 14px', fontSize: 12, fontWeight: 600, color: '#fff', background: 'linear-gradient(140deg,#3f6fe0,#5b8cff)', border: '1px solid rgba(91,140,255,.6)', borderRadius: 8, cursor: 'pointer' },
           onClick: function () {
             lyxToast('正在备份…');
             fetch('/lanyuxi/backup', { method: 'POST' }).then(function (r) { return r.json(); }).then(function (d) {
