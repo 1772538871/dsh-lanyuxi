@@ -26,7 +26,12 @@ const DEFAULTS = {
   groupOutboundPerDay: 10,
   gptSovitsDir: "E:\\GPT-SoVITS",
   gptSovitsApi: "http://127.0.0.1:9880",
-  voiceEnabled: false,
+  voiceEnabled: true,
+  voiceEngine: "auto",
+  voiceRealtime: false,
+  pythonPath: "python",
+  edgeTtsVoice: "zh-CN-XiaoxiaoNeural",
+  sapiVoice: "Microsoft Huihui Desktop",
   rolloverPercent: 50,
   contextWindowTokens: 1048576,
   charsPerToken: 1,
@@ -823,7 +828,9 @@ export function apply(ctx, rawConfig) {
       const hasImage = typeof args?.image === "string" && args.image.trim() !== ""
       let voiceFile = ""
       if (typeof args?.voice === "string" && args.voice.trim() !== "") {
-        voiceFile = await synthesize(args.voice.trim(), args.emotion || "日常")
+        const built = await synthesize(args.voice.trim(), args.emotion || "日常")
+        voiceFile = built.file
+        diag.voiceEngine = built.engine
       }
       if (!hasText && !hasImage && !voiceFile) throw new Error("text / image / voice 至少给一个")
       if (hasImage) {
@@ -1136,31 +1143,107 @@ export function apply(ctx, rawConfig) {
     wonder.repliedAt = Date.now()
     saveWonder()
   }
-  // —— 语音：调本地 GPT-SoVITS 合成，短句缓存 ——
-  async function synthesize(text, emotion = "日常") {
-    const api = config.gptSovitsApi || "http://127.0.0.1:9880"
-    const home = config.homeDir || "E:\\dsh-foundry\\lanyuxi-home"
-    const cacheDir = join(home, "voice", "cache")
-    mkdirSync(cacheDir, { recursive: true })
-    const key = createHash("md5").update(emotion + "|" + text).digest("hex").slice(0, 16)
-    const out = join(cacheDir, key + ".wav")
-    if (existsSync(out)) return out
-    const ref = config.gptSovitsRef || join(home, "voice", "ref.wav")
-    if (!existsSync(ref)) throw new Error("还没有参考音频：" + ref + "（放一段主人的声音进去）")
-    const url = api.replace(/\/$/, "") + "/tts?text=" + encodeURIComponent(text) +
+  // —— 语音：三级引擎（GPT-SoVITS → edge-tts → SAPI），短句缓存 ——
+  const voiceDir = () => join(config.homeDir || "E:\\dsh-foundry\\lanyuxi-home", "voice")
+  const cacheDir = () => join(voiceDir(), "cache")
+  let voiceEngineCache = { name: "", at: 0 }
+  function probeGptSovits() {
+    try {
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), 1500)
+      return fetch((config.gptSovitsApi || "http://127.0.0.1:9880") + "/", { signal: ctrl.signal })
+        .then(() => true).catch(() => false).finally(() => clearTimeout(timer))
+    } catch { return Promise.resolve(false) }
+  }
+  function probeEdgeTts() {
+    try {
+      const r = spawnSync(config.pythonPath || "python", ["-c", "import edge_tts"], { windowsHide: true, timeout: 8000 })
+      return r.status === 0
+    } catch { return false }
+  }
+  async function resolveVoiceEngine() {
+    const want = config.voiceEngine || "auto"
+    if (want !== "auto") return want
+    if (await probeGptSovits()) return "gpt-sovits"
+    if (probeEdgeTts()) return "edge-tts"
+    if (process.platform === "win32") return "sapi"
+    return "off"
+  }
+  function cachePath(engine, text) {
+    mkdirSync(cacheDir(), { recursive: true })
+    const ext = engine === "edge-tts" ? ".mp3" : ".wav"
+    const key = createHash("md5").update(engine + "|" + text).digest("hex").slice(0, 16)
+    return join(cacheDir(), key + ext)
+  }
+  async function synthGptSovits(text, out) {
+    const ref = config.gptSovitsRef || join(voiceDir(), "ref.wav")
+    if (!existsSync(ref)) throw new Error("缺少参考音频：" + ref)
+    const url = (config.gptSovitsApi || "http://127.0.0.1:9880").replace(/\/$/, "") + "/tts?text=" + encodeURIComponent(text) +
       "&text_lang=" + encodeURIComponent(config.gptSovitsTextLang || "zh") +
       "&ref_audio_path=" + encodeURIComponent(ref) +
       "&prompt_lang=" + encodeURIComponent(config.gptSovitsPromptLang || "ja") +
       "&prompt_text=" + encodeURIComponent(config.gptSovitsPrompt || "") +
       "&media_type=wav"
     const res = await fetch(url)
-    if (!res.ok) throw new Error("语音合成失败 HTTP " + res.status)
+    if (!res.ok) throw new Error("GPT-SoVITS 合成失败 HTTP " + res.status)
     const buf = Buffer.from(await res.arrayBuffer())
-    if (buf.length < 1000) throw new Error("合成结果太小，引擎可能没就绪")
+    if (buf.length < 1000) throw new Error("合成结果太小")
     writeFileSync(out, buf)
     return out
   }
-
+  function synthEdgeTts(text, out) {
+    const r = spawnSync(config.pythonPath || "python", ["-m", "edge_tts", "--voice", config.edgeTtsVoice || "zh-CN-XiaoxiaoNeural", "--text", text, "--write-media", out], { windowsHide: true, timeout: 60000 })
+    if (r.status !== 0 || !existsSync(out)) throw new Error("edge-tts 合成失败：" + String(r.stderr || "").slice(0, 200))
+    return out
+  }
+  function synthSapi(text, out) {
+    const script = `Add-Type -AssemblyName System.Speech; $s=New-Object System.Speech.Synthesis.SpeechSynthesizer; $s.SelectVoice('${config.sapiVoice || "Microsoft Huihui Desktop"}'); $s.SetOutputToWaveFile('${out.replace(/'/g, "''")}'); $s.Speak([Console]::In.ReadToEnd()); $s.Dispose()`
+    const r = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { input: text, windowsHide: true, timeout: 60000 })
+    if (r.status !== 0 || !existsSync(out)) throw new Error("SAPI 合成失败：" + String(r.stderr || "").slice(0, 200))
+    return out
+  }
+  /** 合成一句；引擎自动降级；同样的句子命中缓存。 */
+  async function synthesize(text, emotion = "日常") {
+    const engine = await resolveVoiceEngine()
+    if (engine === "off") throw new Error("没有可用的语音引擎")
+    const out = cachePath(engine, text)
+    if (existsSync(out)) return { file: out, engine }
+    if (engine === "gpt-sovits") {
+      if (!config.voiceRealtime) throw new Error("这句还没录（GPT-SoVITS 实时合成太慢，先用预生成或换 edge-tts）")
+      return { file: await synthGptSovits(text, out), engine }
+    }
+    if (engine === "edge-tts") return { file: synthEdgeTts(text, out), engine }
+    return { file: synthSapi(text, out), engine }
+  }
+  /** 把常用句批量预生成（只对慢引擎有意义）。 */
+  const warmState = { running: false, done: 0, total: 0, engine: "", error: "" }
+  async function warmPhrases(list, engine) {
+    warmState.running = true
+    warmState.error = ""
+    warmState.done = 0
+    warmState.total = list.length
+    warmState.engine = engine
+    for (const line of list) {
+      try {
+        const out = cachePath(engine, line)
+        if (!existsSync(out)) {
+          if (engine === "gpt-sovits") await synthGptSovits(line, out)
+          else if (engine === "edge-tts") synthEdgeTts(line, out)
+          else synthSapi(line, out)
+        }
+        warmState.done += 1
+      } catch (error) {
+        warmState.error = String(error)
+      }
+      saveVoiceWarm()
+    }
+    warmState.running = false
+    saveVoiceWarm()
+  }
+  const warmPath = () => join(config.sessionCwd || process.cwd(), ".lanyuxi-voice-warm.json")
+  function saveVoiceWarm() {
+    try { writeFileSync(warmPath(), JSON.stringify(warmState, null, 2), "utf8") } catch {}
+  }
   // —— B 站：Cookie 登录与身份校验（扫码后续再补） ——
   const biliPath = () => join(config.sessionCwd || process.cwd(), ".lanyuxi-bili.json")
   const bili = { cookie: "", profile: null, checkedAt: 0 }
@@ -1368,7 +1451,33 @@ export function apply(ctx, rawConfig) {
             saveBili()
           }
           return send(200, { loggedIn: Boolean(bili.profile), profile: bili.profile, hasCookie: Boolean(bili.cookie), checkedAt: bili.checkedAt })
-        }        if (url.pathname === "/lanyuxi/voice") {
+        }        if (url.pathname === "/lanyuxi/voice/test") {
+          const q = url.searchParams.get("text") || "早啊，起床了没。"
+          try {
+            const built = await synthesize(q, "日常")
+            diag.voiceEngine = built.engine
+            return send(200, { ok: true, engine: built.engine, file: built.file })
+          } catch (error) {
+            return send(500, { ok: false, error: String(error) })
+          }
+        }
+        if (url.pathname === "/lanyuxi/voice/warm") {
+          if (req.method !== "POST") return send(405, { ok: false })
+          if (warmState.running) return send(409, { ok: false, error: "已经在跑了", ...warmState })
+          try {
+            const file = join(voiceDir(), "phrases.txt")
+            const list = existsSync(file)
+              ? readFileSync(file, "utf8").split(/\r?\n/).map((s) => s.trim()).filter((s) => s && !s.startsWith("#"))
+              : []
+            if (!list.length) return send(400, { ok: false, error: "phrases.txt 是空的" })
+            const engine = url.searchParams.get("engine") || await resolveVoiceEngine()
+            warmPhrases(list, engine)
+            return send(200, { ok: true, started: true, total: list.length, engine })
+          } catch (error) {
+            return send(500, { ok: false, error: String(error) })
+          }
+        }
+        if (url.pathname === "/lanyuxi/voice") {
           const home = config.homeDir || "E:\\dsh-foundry\\lanyuxi-home"
           const engineDir = config.gptSovitsDir || "E:\\GPT-SoVITS"
           const countFiles = (dir) => {
@@ -1376,7 +1485,10 @@ export function apply(ctx, rawConfig) {
           }
           let ffmpegOk = false
           try { ffmpegOk = spawnSync(config.ffmpegPath || "ffmpeg", ["-version"], { windowsHide: true, timeout: 5000 }).status === 0 } catch {}
+          const active = await resolveVoiceEngine()
           return send(200, {
+            activeEngine: active,
+            warm: warmState,
             engine: { dir: engineDir, installed: existsSync(engineDir) },
             ffmpeg: ffmpegOk,
             samples: countFiles(join(home, "voice")),
