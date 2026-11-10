@@ -1202,18 +1202,41 @@ export function apply(ctx, rawConfig) {
     if (r.status !== 0 || !existsSync(out)) throw new Error("SAPI 合成失败：" + String(r.stderr || "").slice(0, 200))
     return out
   }
-  /** 合成一句；引擎自动降级；同样的句子命中缓存。 */
+  /** 引擎顺序：配置指定 → 否则 GPT-SoVITS / edge-tts / SAPI 依次尝试，哪个成功用哪个。 */
+  async function engineChain() {
+    const want = config.voiceEngine || "auto"
+    if (want !== "auto") return [want]
+    const list = []
+    if (await probeGptSovits()) list.push("gpt-sovits")
+    if (probeEdgeTts()) list.push("edge-tts")
+    if (process.platform === "win32") list.push("sapi")
+    return list
+  }
+  /** 合成一句：先查缓存，再按引擎链逐个试，失败的记下来继续。 */
   async function synthesize(text, emotion = "日常") {
-    const engine = await resolveVoiceEngine()
-    if (engine === "off") throw new Error("没有可用的语音引擎")
-    const out = cachePath(engine, text)
-    if (existsSync(out)) return { file: out, engine }
-    if (engine === "gpt-sovits") {
-      if (!config.voiceRealtime) throw new Error("这句还没录（GPT-SoVITS 实时合成太慢，先用预生成或换 edge-tts）")
-      return { file: await synthGptSovits(text, out), engine }
+    const chain = await engineChain()
+    if (!chain.length) throw new Error("没有可用的语音引擎")
+    const failures = []
+    for (const engine of chain) {
+      const out = cachePath(engine, text)
+      if (existsSync(out) && statSync(out).size > 1000) return { file: out, engine, cached: true }
+      try {
+        if (engine === "gpt-sovits") {
+          if (!config.voiceRealtime) throw new Error("GPT-SoVITS 实时合成太慢（CPU 约 150 秒），这句没预生成过")
+          await synthGptSovits(text, out)
+        } else if (engine === "edge-tts") {
+          synthEdgeTts(text, out)
+        } else {
+          synthSapi(text, out)
+        }
+        if (!existsSync(out) || statSync(out).size < 1000) throw new Error(engine + " 产物为空")
+        return { file: out, engine }
+      } catch (error) {
+        failures.push(engine + ": " + String(error).slice(0, 120))
+        diag.voiceErrors = failures
+      }
     }
-    if (engine === "edge-tts") return { file: synthEdgeTts(text, out), engine }
-    return { file: synthSapi(text, out), engine }
+    throw new Error("所有语音引擎都失败 —— " + failures.join(" ｜ "))
   }
   /** 把常用句批量预生成（只对慢引擎有意义）。 */
   const warmState = { running: false, done: 0, total: 0, engine: "", error: "" }
@@ -1456,7 +1479,7 @@ export function apply(ctx, rawConfig) {
           try {
             const built = await synthesize(q, "日常")
             diag.voiceEngine = built.engine
-            return send(200, { ok: true, engine: built.engine, file: built.file })
+            return send(200, { ok: true, engine: built.engine, file: built.file, cached: Boolean(built.cached) })
           } catch (error) {
             return send(500, { ok: false, error: String(error) })
           }
