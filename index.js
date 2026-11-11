@@ -1262,10 +1262,16 @@ export function apply(ctx, rawConfig) {
     if (process.platform === "win32") return "sapi"
     return "off"
   }
-  function cachePath(engine, text) {
+  function currentLang() {
+    return settings.voiceLang || config.gptSovitsTextLang || "zh"
+  }
+  /** 缓存键含语言：中文沿用老键（预热的 12 句可直接命中），其它语言单独一套。 */
+  function cachePath(engine, text, lang) {
     mkdirSync(cacheDir(), { recursive: true })
     const ext = engine === "edge-tts" ? ".mp3" : ".wav"
-    const key = createHash("md5").update(engine + "|" + text).digest("hex").slice(0, 16)
+    const useLang = lang || currentLang()
+    const tag = useLang === "zh" ? "" : useLang + "|"
+    const key = createHash("md5").update(engine + "|" + tag + text).digest("hex").slice(0, 16)
     return join(cacheDir(), key + ext)
   }
   async function synthGptSovits(text, out) {
@@ -1321,9 +1327,10 @@ export function apply(ctx, rawConfig) {
     const chain = await engineChain()
     if (!chain.length) throw new Error("没有可用的语音引擎")
     const failures = []
+    const lang = currentLang()
     for (const engine of chain) {
-      const out = cachePath(engine, text)
-      if (existsSync(out) && statSync(out).size > 1000) return { file: out, engine, cached: true }
+      const out = cachePath(engine, text, lang)
+      if (existsSync(out) && statSync(out).size > 1000) return { file: out, engine, lang, cached: true }
       try {
         if (engine === "gpt-sovits") {
           if (!config.voiceRealtime) throw new Error("GPT-SoVITS 实时合成太慢（CPU 约 150 秒），这句没预生成过")
@@ -1334,7 +1341,7 @@ export function apply(ctx, rawConfig) {
           synthSapi(text, out)
         }
         if (!existsSync(out) || statSync(out).size < 1000) throw new Error(engine + " 产物为空")
-        return { file: out, engine }
+        return { file: out, engine, lang }
       } catch (error) {
         failures.push(engine + ": " + String(error).slice(0, 120))
         diag.voiceErrors = failures
@@ -1637,14 +1644,15 @@ export function apply(ctx, rawConfig) {
               ? readFileSync(phrasesFile, "utf8").split(/\r?\n/).map((s) => s.trim()).filter((s) => s && !s.startsWith("#"))
               : []
             const engine = settings.voiceEngine === "auto" ? await resolveVoiceEngine() : settings.voiceEngine
-            const cachedOne = (list) => list.find((line) => existsSync(cachePath(engine, line)) && statSync(cachePath(engine, line)).size > 1000)
+            const lang = currentLang()
+            const cachedOne = (list) => list.find((line) => existsSync(cachePath(engine, line, lang)) && statSync(cachePath(engine, line, lang)).size > 1000)
             let q = explicit
             if (!q) {
               const hit = cachedOne(phrases)
               if (!hit && phrases.length) {
                 // 没有缓存就用第一句，后台转，转好再点一次
                 const target = phrases[0]
-                const out = cachePath(engine, target)
+                const out = cachePath(engine, target, lang)
                 void (async () => {
                   try {
                     if (engine === "gpt-sovits") await synthGptSovits(target, out)
@@ -1653,19 +1661,19 @@ export function apply(ctx, rawConfig) {
                     diag.voiceTest = "ok"
                   } catch (error) { diag.voiceTest = String(error) }
                 })()
-                return send(200, { ok: true, pending: true, engine, text: target, hint: "这句还没录，正在后台合成（约 150 秒），过一会儿再点一次" })
+                return send(200, { ok: true, pending: true, engine, lang, text: target, hint: "这句还没录，正在后台合成（约 150 秒），过一会儿再点一次" })
               }
               q = hit || phrases[0] || "早啊。"
             }
-            const out = cachePath(engine, q)
+            const out = cachePath(engine, q, lang)
             if (existsSync(out) && statSync(out).size > 1000) {
-              return send(200, { ok: true, engine, file: out, text: q, cached: true })
+              return send(200, { ok: true, engine, lang, file: out, text: q, cached: true })
             }
             // 明确指定了文字且没缓存：直接合成（会等，最多 150 秒）
             if (engine === "gpt-sovits") await synthGptSovits(q, out)
             else if (engine === "edge-tts") synthEdgeTts(q, out)
             else synthSapi(q, out)
-            return send(200, { ok: true, engine, file: out, text: q, cached: false })
+            return send(200, { ok: true, engine, lang, file: out, text: q, cached: false })
           } catch (error) {
             return send(500, { ok: false, error: String(error), tried: diag.voiceErrors || [] })
           }

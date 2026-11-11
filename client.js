@@ -447,7 +447,7 @@ window.__ModuleLoader__.load({
             '<div style="margin-top:12px"><div class="lbl">参考音频的原文</div><div class="hint" style="margin-bottom:4px">这段文字必须与 ref.wav 里真实说的话一致；存在 lanyuxi-home\\voice\\ref.txt，可以直接改文件</div>' +
               '<div style="padding:8px 10px;border-radius:8px;background:#0f1520;color:#dfe7ff;font-size:13px">' + esc(d.refText || '（ref.txt 还是空的）') + '</div></div>' +
             '<div class="row" style="margin-top:12px;align-items:center;gap:10px"><div><div class="lbl">合成语言</div><div class="hint">中文是跨语种（带点口音）；日语最贴宫园薰原声</div></div>' +
-              '<button class="btn ghost" id="lyx-voice-lang" style="padding:6px 14px;min-width:96px">' + ({ zh: '中文', ja: '日语', en: '英语' }[d.voiceLang] || '中文') + '</button></div>' +
+              '<button id="lyx-voice-lang" style="padding:7px 16px;min-width:104px;font-size:13px;font-weight:600;color:#fff;background:linear-gradient(140deg,#3f6fe0,#5b8cff);border:1px solid rgba(91,140,255,.7);border-radius:9px;cursor:pointer">' + ({ zh: '中文 ⇄', ja: '日语 ⇄', en: '英语 ⇄' }[d.voiceLang] || '中文 ⇄') + '</button></div>' +
             '<div style="margin-top:12px"><div class="lbl">GPT-SoVITS 安装路径</div><div class="hint" style="margin-bottom:6px">' + (d.installOk ? '已找到 runtime\\python.exe 与 api_v2.py' : '这个路径下没找到引擎文件') + '</div>' +
               '<input id="lyx-voice-dir" type="text" value="' + esc(d.installDir) + '" style="width:100%;box-sizing:border-box;text-align:left" /></div>' +
             '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center">' +
@@ -475,7 +475,7 @@ window.__ModuleLoader__.load({
             langBtn.disabled = true;
             fetch('/lanyuxi/voice/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lang: next }) })
               .then(function (r) { return r.json(); })
-              .then(function () { langBtn.textContent = names[next]; langBtn.disabled = false; lyxToast('合成语言：' + names[next]); load(); })
+              .then(function () { langBtn.textContent = names[next] + ' ⇄'; langBtn.disabled = false; lyxToast('合成语言：' + names[next] + '（下一步试听会换语言）'); load(); })
               .catch(function () { langBtn.disabled = false; });
           };
           const dir = root.querySelector('#lyx-voice-dir');
@@ -528,7 +528,8 @@ window.__ModuleLoader__.load({
               if (x && x.ok) {
                 const name = x.file.split(/[\\/]/).pop();
                 playVoice(name, x.text);
-                lyxToast('用 ' + x.engine + ' 合成好了：' + (x.text || name));
+                const langName = { zh: '中文', ja: '日语', en: '英语' }[x.lang] || '中文';
+                lyxToast('用 ' + x.engine + ' · ' + langName + ' 合成：' + (x.text || name));
               } else {
                 lyxToast('失败：' + ((x && x.error) || '未知'));
               }
