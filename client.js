@@ -438,14 +438,14 @@ window.__ModuleLoader__.load({
           if (dead || !d) return;
           card1.innerHTML =
             '<h3>语音引擎 <span class="pill ' + (d.process.status === 'running' || d.selectedEngine !== 'gpt-sovits' ? 'ok' : 'warn') + '">' + esc(statusText(d)) + '</span></h3>' +
-            '<div class="row" style="margin-top:10px"><div><div class="lbl">用哪个引擎</div><div class="hint">GPT-SoVITS 需要本机安装；换台电脑就选 edge-tts 或 SAPI</div></div>' +
-              '<select id="lyx-voice-engine" style="background:#141b26;color:#dfe7ff;border:1px solid rgba(91,140,255,.35);border-radius:8px;padding:5px 8px;font-size:12.5px">' +
+            '<div style="margin-top:10px"><div class="lbl">用哪个引擎</div><div class="hint" style="margin-bottom:6px">GPT-SoVITS 需要本机安装；换台电脑就选 edge-tts 或 SAPI</div>' +
+              '<select id="lyx-voice-engine" style="width:100%;box-sizing:border-box;background:#141b26;color:#dfe7ff;border:1px solid rgba(91,140,255,.35);border-radius:8px;padding:5px 8px;font-size:12.5px">' +
                 ['gpt-sovits', 'edge-tts', 'sapi', 'auto'].map(function (e) {
                   return '<option value="' + e + '"' + (d.selectedEngine === e ? ' selected' : '') + '>' + esc(labelEngine(e)) + '</option>';
                 }).join('') +
               '</select></div>' +
-            '<div class="row"><div><div class="lbl">GPT-SoVITS 安装路径</div><div class="hint">' + (d.installOk ? '已找到 runtime\\python.exe 与 api_v2.py' : '这个路径下没找到引擎文件') + '</div></div>' +
-              '<input id="lyx-voice-dir" type="text" value="' + esc(d.installDir) + '" style="width:300px;text-align:left" /></div>' +
+            '<div style="margin-top:12px"><div class="lbl">GPT-SoVITS 安装路径</div><div class="hint" style="margin-bottom:6px">' + (d.installOk ? '已找到 runtime\\python.exe 与 api_v2.py' : '这个路径下没找到引擎文件') + '</div>' +
+              '<input id="lyx-voice-dir" type="text" value="' + esc(d.installDir) + '" style="width:100%;box-sizing:border-box;text-align:left" /></div>' +
             '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">' +
               '<button class="btn primary" id="lyx-voice-start">启动引擎</button>' +
               '<button class="btn ghost" id="lyx-voice-stop">关闭引擎</button>' +

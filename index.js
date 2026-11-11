@@ -1331,6 +1331,11 @@ export function apply(ctx, rawConfig) {
   }
   /** 把常用句批量预生成（只对慢引擎有意义）。 */
   const warmState = { running: false, done: 0, total: 0, engine: "", error: "" }
+  try {
+    const wp = join(config.sessionCwd || process.cwd(), ".lanyuxi-voice-warm.json")
+    if (existsSync(wp)) Object.assign(warmState, JSON.parse(readFileSync(wp, "utf8")))
+    warmState.running = false
+  } catch {}
   async function warmPhrases(list, engine) {
     warmState.running = true
     warmState.error = ""
