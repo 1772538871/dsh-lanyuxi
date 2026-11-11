@@ -419,44 +419,78 @@ window.__ModuleLoader__.load({
         const root = document.querySelector('.lyx-scope #view-voice');
         if (!root) return;
         let dead = false;
-        fetch('/lanyuxi/voice', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) {
+        const card1 = root.querySelector('.card');
+        if (!card1) return;
+        function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+        function labelEngine(e) {
+          return { 'gpt-sovits': 'GPT-SoVITS（音色最像，慢）', 'edge-tts': 'edge-tts（免费在线，快）', 'sapi': 'Windows SAPI（离线，机器音）', auto: '自动（按顺序降级）' }[e] || e;
+        }
+        function statusText(d) {
+          if (d.selectedEngine === 'sapi') return '不需要引擎进程，随叫随到';
+          if (d.selectedEngine === 'edge-tts') return '在线合成，不需要本地引擎';
+          if (d.process.status === 'running') return '正在运行（端口 ' + (d.process.pid ? 'pid ' + d.process.pid : '9880') + '）';
+          if (d.process.status === 'starting') return '启动中（模型加载约 40–60 秒）';
+          if (d.process.status === 'missing') return '找不到引擎文件，检查下面的安装路径';
+          if (d.process.status === 'failed') return '启动失败：' + d.process.error;
+          return '未运行';
+        }
+        function paint(d) {
           if (dead || !d) return;
-          const cards = Array.prototype.slice.call(root.querySelectorAll('.card'));
-          function cardBy(kw) {
-            return cards.filter(function (c) { const h = c.querySelector('h3'); return h && h.textContent.indexOf(kw) >= 0; })[0];
-          }
-          function setTag(card, text, tone) {
-            if (!card) return;
-            const tag = card.querySelector('.tag, .pill');
-            if (tag) { tag.textContent = text; tag.className = (tag.className.indexOf('pill') >= 0 ? 'pill ' : 'tag ') + (tone || ''); }
-          }
-          const engineCard = cards[0];
-          if (engineCard) {
-            const tags = engineCard.querySelectorAll('.tag, .pill');
-            const list = Array.prototype.slice.call(tags);
-            if (list[0]) { list[0].textContent = d.engine.installed ? '已就位' : '未安装'; list[0].className = list[0].className.replace(/\b(ok|off|warn)\b/g, '').trim() + ' ' + (d.engine.installed ? 'green' : ''); }
-            if (list[1]) { list[1].textContent = d.ffmpeg ? 'ffmpeg ✓' : 'ffmpeg ✗'; list[1].className = list[1].className.replace(/\b(ok|off|warn)\b/g, '').trim() + ' ' + (d.ffmpeg ? 'green' : 'pink'); }
-          }
-          Array.prototype.slice.call(root.querySelectorAll('.k, div')).forEach(function (el) {});
-          const ttsCard = cardBy('试听') || cardBy('语音');
-          if (ttsCard) {
-            const inputs = ttsCard.querySelectorAll('input[type=text], textarea');
-            Array.prototype.forEach.call(inputs, function (inp) {
-              if (!inp.getAttribute('data-wired')) {
-                inp.setAttribute('data-wired', '1');
-                inp.placeholder = d.enabled ? inp.placeholder : '语音引擎还没接通（M4 进行中）';
-              }
-            });
-            Array.prototype.slice.call(ttsCard.querySelectorAll('button')).forEach(function (b) {
-              if (b.textContent.indexOf('试听') >= 0 || b.textContent.indexOf('合成') >= 0) {
-                b.onclick = function () { lyxToast(d.enabled ? '语音合成还没接（下一步做）' : '语音引擎未启用：' + (d.engine.installed ? '已装但未启用' : '还没装 GPT-SoVITS')); };
-              }
-            });
-          }
-        }).catch(function () {});
-        return function () { dead = true; };
+          card1.innerHTML =
+            '<h3>语音引擎 <span class="pill ' + (d.process.status === 'running' || d.selectedEngine !== 'gpt-sovits' ? 'ok' : 'warn') + '">' + esc(statusText(d)) + '</span></h3>' +
+            '<div class="row" style="margin-top:10px"><div><div class="lbl">用哪个引擎</div><div class="hint">GPT-SoVITS 需要本机安装；换台电脑就选 edge-tts 或 SAPI</div></div>' +
+              '<select id="lyx-voice-engine" style="background:#141b26;color:#dfe7ff;border:1px solid rgba(91,140,255,.35);border-radius:8px;padding:5px 8px;font-size:12.5px">' +
+                ['gpt-sovits', 'edge-tts', 'sapi', 'auto'].map(function (e) {
+                  return '<option value="' + e + '"' + (d.selectedEngine === e ? ' selected' : '') + '>' + esc(labelEngine(e)) + '</option>';
+                }).join('') +
+              '</select></div>' +
+            '<div class="row"><div><div class="lbl">GPT-SoVITS 安装路径</div><div class="hint">' + (d.installOk ? '已找到 runtime\\python.exe 与 api_v2.py' : '这个路径下没找到引擎文件') + '</div></div>' +
+              '<input id="lyx-voice-dir" type="text" value="' + esc(d.installDir) + '" style="width:300px;text-align:left" /></div>' +
+            '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">' +
+              '<button class="btn primary" id="lyx-voice-start">启动引擎</button>' +
+              '<button class="btn ghost" id="lyx-voice-stop">关闭引擎</button>' +
+              '<button class="btn" id="lyx-voice-test">试听一句</button>' +
+              '<span class="small" style="margin-left:auto">缓存 ' + (d.cache || 0) + ' 句 · 参考音频 ' + (d.samples || 0) + ' 个</span>' +
+            '</div>' +
+            (d.warm && d.warm.total ? '<div class="small" style="margin-top:8px">预热：' + d.warm.done + ' / ' + d.warm.total + (d.warm.running ? '（进行中）' : '（已完成）') + (d.warm.error ? ' · ' + esc(d.warm.error) : '') + '</div>' : '');
+          const sel = root.querySelector('#lyx-voice-engine');
+          if (sel) sel.onchange = function () {
+            fetch('/lanyuxi/voice/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ engine: sel.value }) })
+              .then(function (r) { return r.json(); }).then(function () { load(); });
+          };
+          const dir = root.querySelector('#lyx-voice-dir');
+          const saveDir = function () {
+            if (!dir) return;
+            fetch('/lanyuxi/voice/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gptSovitsDir: dir.value }) })
+              .then(function (r) { return r.json(); }).then(function (x) { lyxToast(x && x.ok ? '路径已保存，正在尝试启动' : '保存失败'); setTimeout(load, 1500); });
+          };
+          if (dir) dir.onblur = saveDir;
+          const startBtn = root.querySelector('#lyx-voice-start');
+          if (startBtn) startBtn.onclick = function () {
+            startBtn.disabled = true; startBtn.textContent = '启动中…';
+            fetch('/lanyuxi/voice/engine?action=start', { method: 'POST' }).then(function (r) { return r.json(); }).then(function () { setTimeout(load, 3000); });
+            setTimeout(function () { startBtn.disabled = false; startBtn.textContent = '启动引擎'; }, 4000);
+          };
+          const stopBtn = root.querySelector('#lyx-voice-stop');
+          if (stopBtn) stopBtn.onclick = function () {
+            fetch('/lanyuxi/voice/engine?action=stop', { method: 'POST' }).then(function (r) { return r.json(); }).then(function () { load(); });
+          };
+          const testBtn = root.querySelector('#lyx-voice-test');
+          if (testBtn) testBtn.onclick = function () {
+            testBtn.disabled = true; testBtn.textContent = '合成中…';
+            fetch('/lanyuxi/voice/test?text=' + encodeURIComponent('哼，我早就想学了。')).then(function (r) { return r.json(); }).then(function (x) {
+              testBtn.disabled = false; testBtn.textContent = '试听一句';
+              lyxToast(x && x.ok ? ('用 ' + x.engine + ' 合成好了：' + x.file) : ('失败：' + ((x && x.error) || '未知')));
+            }).catch(function () { testBtn.disabled = false; testBtn.textContent = '试听一句'; lyxToast('接口不可用'); });
+          };
+        }
+        function load() {
+          fetch('/lanyuxi/voice', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(paint).catch(function () {});
+        }
+        load();
+        const timer = setInterval(load, 8000);
+        return function () { dead = true; clearInterval(timer); };
       }, [tab]);
-
       React.useEffect(function () {
         if (tab !== 'assets') return;
         const root = document.querySelector('.lyx-scope #view-assets');

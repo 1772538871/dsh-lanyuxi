@@ -22,7 +22,7 @@
         # 语音（M4）：装好 GPT-SoVITS 后把 voiceEnabled 改 true，API 默认 http://127.0.0.1:9880
         # 语音：auto 会按 GPT-SoVITS → edge-tts → SAPI 自动挑；voiceRealtime 控制慢引擎是否允许实时合成
         voiceEnabled: true
-        voiceEngine: auto
+        voiceEngine: gpt-sovits
         voiceRealtime: false
         pythonPath: python
         edgeTtsVoice: zh-CN-XiaoxiaoNeural
@@ -33,4 +33,4 @@
         gptSovitsPromptLang: ja
         gptSovitsTextLang: zh
         gptSovitsApi: http://127.0.0.1:9880
-        gptSovitsDir: E:\GPT-SoVITS
+        gptSovitsDir: E:\IDM\ZIP\GPT-SoVITS-v4-20250422fix

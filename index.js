@@ -26,6 +26,7 @@ const DEFAULTS = {
   groupOutboundPerDay: 10,
   gptSovitsDir: "E:\\GPT-SoVITS",
   gptSovitsApi: "http://127.0.0.1:9880",
+  gptSovitsPort: 9880,
   voiceEnabled: true,
   voiceEngine: "auto",
   voiceRealtime: false,
@@ -386,13 +387,21 @@ export function apply(ctx, rawConfig) {
     }
   }
   const settingsPath = () => join(config.sessionCwd || process.cwd(), ".lanyuxi-settings.json")
-  const settings = { rolloverPercent: config.rolloverPercent || 50, backupHours: Number(config.backupHours ?? 24), backupEnabled: config.backupEnabled !== false }
+  const settings = {
+    rolloverPercent: config.rolloverPercent || 50,
+    backupHours: Number(config.backupHours ?? 24),
+    backupEnabled: config.backupEnabled !== false,
+    voiceEngine: config.voiceEngine || "gpt-sovits",
+    gptSovitsDir: config.gptSovitsDir || "E:\\GPT-SoVITS",
+  }
   try {
     if (existsSync(settingsPath())) {
       const loaded = JSON.parse(readFileSync(settingsPath(), "utf8"))
       if (loaded && Number.isFinite(loaded.rolloverPercent)) settings.rolloverPercent = loaded.rolloverPercent
       if (loaded && Number.isFinite(loaded.backupHours)) settings.backupHours = loaded.backupHours
       if (loaded && typeof loaded.backupEnabled === "boolean") settings.backupEnabled = loaded.backupEnabled
+      if (loaded && typeof loaded.voiceEngine === "string") settings.voiceEngine = loaded.voiceEngine
+      if (loaded && typeof loaded.gptSovitsDir === "string" && loaded.gptSovitsDir) settings.gptSovitsDir = loaded.gptSovitsDir
     }
   } catch {}
   function saveSettings() {
@@ -1146,6 +1155,88 @@ export function apply(ctx, rawConfig) {
   // —— 语音：三级引擎（GPT-SoVITS → edge-tts → SAPI），短句缓存 ——
   const voiceDir = () => join(config.homeDir || "E:\\dsh-foundry\\lanyuxi-home", "voice")
   const cacheDir = () => join(voiceDir(), "cache")
+  // —— 语音引擎进程管理：装了 GPT-SoVITS 就随插件自动拉起 ——
+  const voiceState = { pid: 0, status: "stopped", startedAt: 0, error: "", lastProbeAt: 0 }
+  function voiceSettingsDir() {
+    return settings.gptSovitsDir || config.gptSovitsDir || "E:\\GPT-SoVITS"
+  }
+  function engineLaunchTarget() {
+    const dir = voiceSettingsDir()
+    const py = join(dir, "runtime", "python.exe")
+    const script = join(dir, "api_v2.py")
+    return { dir, py, script, ok: existsSync(py) && existsSync(script) }
+  }
+  async function engineAlive() {
+    try {
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), 1200)
+      await fetch((config.gptSovitsApi || "http://127.0.0.1:9880") + "/", { signal: ctrl.signal })
+      clearTimeout(timer)
+      return true
+    } catch { return false }
+  }
+  async function startEngine() {
+    const target = engineLaunchTarget()
+    if (!target.ok) {
+      voiceState.status = "missing"
+      voiceState.error = "找不到 runtime\\python.exe 或 api_v2.py（路径：" + target.dir + "）"
+      return voiceState
+    }
+    if (await engineAlive()) {
+      voiceState.status = "running"
+      voiceState.startedAt = voiceState.startedAt || Date.now()
+      return voiceState
+    }
+    try {
+      const proc = spawn(target.py, [target.script, "-a", "127.0.0.1", "-p", String(config.gptSovitsPort || 9880)], {
+        cwd: target.dir,
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+      })
+      proc.unref()
+      voiceState.pid = proc.pid || 0
+      voiceState.status = "starting"
+      voiceState.startedAt = Date.now()
+      voiceState.error = ""
+      // 后台轮询最多 120 秒，起来了就把状态改成 running
+      ;(async () => {
+        for (let i = 0; i < 40; i += 1) {
+          await new Promise((r) => setTimeout(r, 3000))
+          voiceState.lastProbeAt = Date.now()
+          if (await engineAlive()) { voiceState.status = "running"; return }
+        }
+        voiceState.status = "failed"
+        voiceState.error = "启动超时（模型加载慢或依赖缺失）"
+      })()
+      return voiceState
+    } catch (error) {
+      voiceState.status = "failed"
+      voiceState.error = String(error)
+      return voiceState
+    }
+  }
+  async function stopEngine() {
+    try {
+      if (voiceState.pid) {
+        if (process.platform === "win32") spawnSync("taskkill", ["/PID", String(voiceState.pid), "/T", "/F"], { windowsHide: true })
+        else try { process.kill(voiceState.pid) } catch {}
+      }
+      if (process.platform === "win32") {
+        const out = spawnSync("netstat", ["-ano"], { windowsHide: true }).stdout?.toString() || ""
+        const line = out.split(/\r?\n/).find((l) => l.includes(":9880") && l.includes("LISTENING"))
+        const pid = line ? line.trim().split(/\s+/).pop() : ""
+        if (pid && /^\d+$/.test(pid)) spawnSync("taskkill", ["/PID", pid, "/T", "/F"], { windowsHide: true })
+      }
+      voiceState.status = "stopped"
+      voiceState.pid = 0
+      return voiceState
+    } catch (error) {
+      voiceState.error = String(error)
+      return voiceState
+    }
+  }
+
   let voiceEngineCache = { name: "", at: 0 }
   function probeGptSovits() {
     try {
@@ -1162,7 +1253,7 @@ export function apply(ctx, rawConfig) {
     } catch { return false }
   }
   async function resolveVoiceEngine() {
-    const want = config.voiceEngine || "auto"
+    const want = settings.voiceEngine || config.voiceEngine || "auto"
     if (want !== "auto") return want
     if (await probeGptSovits()) return "gpt-sovits"
     if (probeEdgeTts()) return "edge-tts"
@@ -1204,7 +1295,7 @@ export function apply(ctx, rawConfig) {
   }
   /** 引擎顺序：配置指定 → 否则 GPT-SoVITS / edge-tts / SAPI 依次尝试，哪个成功用哪个。 */
   async function engineChain() {
-    const want = config.voiceEngine || "auto"
+    const want = settings.voiceEngine || config.voiceEngine || "auto"
     if (want !== "auto") return [want]
     const list = []
     if (await probeGptSovits()) list.push("gpt-sovits")
@@ -1474,7 +1565,40 @@ export function apply(ctx, rawConfig) {
             saveBili()
           }
           return send(200, { loggedIn: Boolean(bili.profile), profile: bili.profile, hasCookie: Boolean(bili.cookie), checkedAt: bili.checkedAt })
-        }        if (url.pathname === "/lanyuxi/voice/test") {
+        }        if (url.pathname === "/lanyuxi/voice/config") {
+          if (req.method !== "POST") return send(405, { ok: false })
+          let body = ""
+          req.on("data", (chunk) => { body += chunk })
+          req.on("end", async () => {
+            try {
+              const payload = body ? JSON.parse(body) : {}
+              let needStart = false
+              if (typeof payload.engine === "string" && ["auto", "gpt-sovits", "edge-tts", "sapi"].includes(payload.engine)) {
+                if (settings.voiceEngine !== payload.engine && payload.engine !== "sapi") needStart = payload.engine !== "edge-tts"
+                settings.voiceEngine = payload.engine
+              }
+              if (typeof payload.gptSovitsDir === "string" && payload.gptSovitsDir.trim()) {
+                settings.gptSovitsDir = payload.gptSovitsDir.trim()
+                needStart = true
+              }
+              saveSettings()
+              if (needStart) startEngine()
+              send(200, { ok: true, engine: settings.voiceEngine, dir: voiceSettingsDir(), state: voiceState })
+            } catch (error) {
+              send(500, { ok: false, error: String(error) })
+            }
+          })
+          return
+        }
+        if (url.pathname === "/lanyuxi/voice/engine") {
+          if (req.method !== "POST") return send(405, { ok: false })
+          const action = url.searchParams.get("action") || "status"
+          if (action === "stop") { await stopEngine(); return send(200, { ok: true, state: voiceState }) }
+          if (action === "start") { await startEngine(); return send(200, { ok: true, state: voiceState }) }
+          const alive = await engineAlive()
+          return send(200, { ok: true, alive, state: voiceState })
+        }
+        if (url.pathname === "/lanyuxi/voice/test") {
           const q = url.searchParams.get("text") || "早啊，起床了没。"
           try {
             const built = await synthesize(q, "日常")
@@ -1509,12 +1633,20 @@ export function apply(ctx, rawConfig) {
           let ffmpegOk = false
           try { ffmpegOk = spawnSync(config.ffmpegPath || "ffmpeg", ["-version"], { windowsHide: true, timeout: 5000 }).status === 0 } catch {}
           const active = await resolveVoiceEngine()
+          const alive = await engineAlive()
+          if (alive && voiceState.status !== "running") { voiceState.status = "running" }
           return send(200, {
             activeEngine: active,
+            selectedEngine: settings.voiceEngine,
+            installDir: voiceSettingsDir(),
+            installOk: engineLaunchTarget().ok,
+            process: voiceState,
+            engineAlive: alive,
             warm: warmState,
             engine: { dir: engineDir, installed: existsSync(engineDir) },
             ffmpeg: ffmpegOk,
             samples: countFiles(join(home, "voice")),
+            cache: countFiles(join(home, "voice", "cache")),
             cache: countFiles(join(home, "voice", "cache")),
             enabled: Boolean(config.voiceEnabled),
             emotionTiers: ["日常", "撒娇"],
@@ -1790,6 +1922,15 @@ export function apply(ctx, rawConfig) {
     }, 60 * 1000)
     return () => clearInterval(backupTimer)
   }, "lanyuxi: 会话备份")
+
+  ctx.effect(() => {
+    const timer = setTimeout(() => {
+      const want = settings.voiceEngine || config.voiceEngine || "auto"
+      if (want === "off" || want === "sapi" || want === "edge-tts") return
+      startEngine().catch((error) => { diag.voiceError = String(error) })
+    }, 5000)
+    return () => clearTimeout(timer)
+  }, "lanyuxi: 语音引擎自启")
 
   ctx.effect(() => {
     const queueTimer = setInterval(drainOutbox, 2000)
