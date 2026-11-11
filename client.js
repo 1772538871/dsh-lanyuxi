@@ -482,6 +482,26 @@ window.__ModuleLoader__.load({
           const textInput = root.querySelector('#lyx-voice-text');
           const counter = root.querySelector('#lyx-voice-count');
           if (textInput && counter) textInput.oninput = function () { counter.textContent = textInput.value.length + ' / 30'; };
+          let audioEl = document.getElementById('lyx-voice-audio');
+          if (!audioEl) {
+            audioEl = document.createElement('audio');
+            audioEl.id = 'lyx-voice-audio';
+            audioEl.style.display = 'none';
+            document.body.appendChild(audioEl);
+          }
+          function playVoice(name, text) {
+            const speaker = root.querySelector('#lyx-voice-speaker');
+            if (speaker) {
+              speaker.style.display = 'inline-flex';
+              speaker.title = text || name;
+              speaker.onclick = function () {
+                audioEl.src = '/lanyuxi/voice/audio?name=' + encodeURIComponent(name);
+                audioEl.play().catch(function () {});
+              };
+            }
+            audioEl.src = '/lanyuxi/voice/audio?name=' + encodeURIComponent(name);
+            audioEl.play().catch(function () { lyxToast('浏览器拦了自动播放，点「🔊 播放」听'); });
+          }
           const testBtn = root.querySelector('#lyx-voice-test');
           if (testBtn) testBtn.onclick = function () {
             const want = textInput ? textInput.value.trim() : '';
@@ -489,7 +509,13 @@ window.__ModuleLoader__.load({
             fetch('/lanyuxi/voice/test' + (want ? ('?text=' + encodeURIComponent(want)) : '')).then(function (r) { return r.json(); }).then(function (x) {
               testBtn.disabled = false; testBtn.textContent = '试听';
               if (x && x.ok && x.pending) { lyxToast(x.hint || '正在合成，稍后再点一次'); return; }
-              lyxToast(x && x.ok ? ('用 ' + x.engine + ' 听到的是：' + (x.text || '') + '（' + x.file.split('\\').pop() + '）') : ('失败：' + ((x && x.error) || '未知')));
+              if (x && x.ok) {
+                const name = x.file.split(/[\\/]/).pop();
+                playVoice(name, x.text);
+                lyxToast('用 ' + x.engine + ' 合成好了：' + (x.text || name));
+              } else {
+                lyxToast('失败：' + ((x && x.error) || '未知'));
+              }
             }).catch(function () { testBtn.disabled = false; testBtn.textContent = '试听'; lyxToast('接口不可用或超时（现场合成可能要 2 分钟）'); });
           };
         }
