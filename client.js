@@ -444,6 +444,8 @@ window.__ModuleLoader__.load({
                   return '<option value="' + e + '"' + (d.selectedEngine === e ? ' selected' : '') + '>' + esc(labelEngine(e)) + '</option>';
                 }).join('') +
               '</select></div>' +
+            '<div style="margin-top:12px"><div class="lbl">参考音频的原文</div><div class="hint" style="margin-bottom:4px">这段文字必须与 ref.wav 里真实说的话一致；存在 lanyuxi-home\\voice\\ref.txt，可以直接改文件</div>' +
+              '<div style="padding:8px 10px;border-radius:8px;background:#0f1520;color:#dfe7ff;font-size:13px">' + esc(d.refText || '（ref.txt 还是空的）') + '</div></div>' +
             '<div style="margin-top:12px"><div class="lbl">合成语言</div><div class="hint" style="margin-bottom:6px">宫园薰是日语声线，选日语更自然；选中文是跨语种合成，会带一点口音</div>' +
               '<select id="lyx-voice-lang" style="width:100%;box-sizing:border-box;background:#141b26;color:#dfe7ff;border:1px solid rgba(91,140,255,.35);border-radius:8px;padding:6px 8px;font-size:12.5px">' +
                 [['zh', '中文（跨语种，可能带口音）'], ['ja', '日语（更贴原声）'], ['en', '英语']].map(function (p) {

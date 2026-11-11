@@ -1270,12 +1270,20 @@ export function apply(ctx, rawConfig) {
   }
   async function synthGptSovits(text, out) {
     const ref = config.gptSovitsRef || join(voiceDir(), "ref.wav")
+    let promptText = config.gptSovitsPrompt || ""
+    try {
+      const refTxt = join(voiceDir(), "ref.txt")
+      if (existsSync(refTxt)) {
+        const body = readFileSync(refTxt, "utf8").split(/\r?\n/).map((s) => s.trim()).filter((s) => s && !s.startsWith("#")).join("")
+        if (body) promptText = body
+      }
+    } catch {}
     if (!existsSync(ref)) throw new Error("缺少参考音频：" + ref)
     const url = (config.gptSovitsApi || "http://127.0.0.1:9880").replace(/\/$/, "") + "/tts?text=" + encodeURIComponent(text) +
       "&text_lang=" + encodeURIComponent(settings.voiceLang || config.gptSovitsTextLang || "zh") +
       "&ref_audio_path=" + encodeURIComponent(ref) +
       "&prompt_lang=" + encodeURIComponent(config.gptSovitsPromptLang || "ja") +
-      "&prompt_text=" + encodeURIComponent(config.gptSovitsPrompt || "") +
+      "&prompt_text=" + encodeURIComponent(promptText) +
       "&media_type=wav"
     const res = await fetch(url)
     if (!res.ok) throw new Error("GPT-SoVITS 合成失败 HTTP " + res.status)
@@ -1693,6 +1701,7 @@ export function apply(ctx, rawConfig) {
             activeEngine: active,
             selectedEngine: settings.voiceEngine,
             voiceLang: settings.voiceLang,
+            refText: (() => { try { const p = join(home, "voice", "ref.txt"); return existsSync(p) ? readFileSync(p, "utf8").split(/\r?\n/).map((s) => s.trim()).filter((s) => s && !s.startsWith("#")).join("") : (config.gptSovitsPrompt || "") } catch { return "" } })(),
             installDir: voiceSettingsDir(),
             installOk: engineLaunchTarget().ok,
             process: voiceState,
