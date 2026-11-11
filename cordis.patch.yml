@@ -29,7 +29,7 @@
         sapiVoice: Microsoft Huihui Desktop
         # 参考音频与文本（宫园薰切片，日语提示 + 中文合成，跨语种）
         gptSovitsRef: E:\dsh-foundry\lanyuxi-home\voice\ref.wav
-        gptSovitsPrompt: 君はひどい奴です。グズ、ノロマ、アンポントン。
+        gptSovitsPrompt: 拝啓、有馬康生様
         gptSovitsPromptLang: ja
         gptSovitsTextLang: zh
         gptSovitsApi: http://127.0.0.1:9880

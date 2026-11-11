@@ -392,6 +392,7 @@ export function apply(ctx, rawConfig) {
     backupHours: Number(config.backupHours ?? 24),
     backupEnabled: config.backupEnabled !== false,
     voiceEngine: config.voiceEngine || "gpt-sovits",
+    voiceLang: config.gptSovitsTextLang || "zh",
     gptSovitsDir: config.gptSovitsDir || "E:\\GPT-SoVITS",
   }
   try {
@@ -401,6 +402,7 @@ export function apply(ctx, rawConfig) {
       if (loaded && Number.isFinite(loaded.backupHours)) settings.backupHours = loaded.backupHours
       if (loaded && typeof loaded.backupEnabled === "boolean") settings.backupEnabled = loaded.backupEnabled
       if (loaded && typeof loaded.voiceEngine === "string") settings.voiceEngine = loaded.voiceEngine
+      if (loaded && ["zh", "ja", "en", "auto"].indexOf(loaded.voiceLang) >= 0) settings.voiceLang = loaded.voiceLang
       if (loaded && typeof loaded.gptSovitsDir === "string" && loaded.gptSovitsDir) settings.gptSovitsDir = loaded.gptSovitsDir
     }
   } catch {}
@@ -1270,7 +1272,7 @@ export function apply(ctx, rawConfig) {
     const ref = config.gptSovitsRef || join(voiceDir(), "ref.wav")
     if (!existsSync(ref)) throw new Error("缺少参考音频：" + ref)
     const url = (config.gptSovitsApi || "http://127.0.0.1:9880").replace(/\/$/, "") + "/tts?text=" + encodeURIComponent(text) +
-      "&text_lang=" + encodeURIComponent(config.gptSovitsTextLang || "zh") +
+      "&text_lang=" + encodeURIComponent(settings.voiceLang || config.gptSovitsTextLang || "zh") +
       "&ref_audio_path=" + encodeURIComponent(ref) +
       "&prompt_lang=" + encodeURIComponent(config.gptSovitsPromptLang || "ja") +
       "&prompt_text=" + encodeURIComponent(config.gptSovitsPrompt || "") +
@@ -1585,6 +1587,9 @@ export function apply(ctx, rawConfig) {
                 if (settings.voiceEngine !== payload.engine && payload.engine !== "sapi") needStart = payload.engine !== "edge-tts"
                 settings.voiceEngine = payload.engine
               }
+              if (typeof payload.lang === "string" && ["zh", "ja", "en", "auto"].indexOf(payload.lang) >= 0) {
+                settings.voiceLang = payload.lang
+              }
               if (typeof payload.gptSovitsDir === "string" && payload.gptSovitsDir.trim()) {
                 settings.gptSovitsDir = payload.gptSovitsDir.trim()
                 needStart = true
@@ -1687,6 +1692,7 @@ export function apply(ctx, rawConfig) {
           return send(200, {
             activeEngine: active,
             selectedEngine: settings.voiceEngine,
+            voiceLang: settings.voiceLang,
             installDir: voiceSettingsDir(),
             installOk: engineLaunchTarget().ok,
             process: voiceState,
