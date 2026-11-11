@@ -1608,7 +1608,8 @@ export function apply(ctx, rawConfig) {
         }
         if (url.pathname === "/lanyuxi/voice/test") {
           try {
-            const explicit = url.searchParams.get("text") || ""
+            const explicit = (url.searchParams.get("text") || "").trim()
+            if (explicit.length > 40) return send(400, { ok: false, error: "太长了，试听限制 40 字以内" })
             const phrasesFile = join(voiceDir(), "phrases.txt")
             const phrases = existsSync(phrasesFile)
               ? readFileSync(phrasesFile, "utf8").split(/\r?\n/).map((s) => s.trim()).filter((s) => s && !s.startsWith("#"))

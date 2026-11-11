@@ -452,7 +452,10 @@ window.__ModuleLoader__.load({
               '<button class="btn" id="lyx-voice-test" style="margin-left:12px">试听一句</button>' +
               '<span class="small" style="margin-left:auto">缓存 ' + (d.cache || 0) + ' 句 · 参考音频 ' + (d.samples || 0) + ' 个</span>' +
             '</div>' +
-            (d.warm && d.warm.total ? '<div class="small" style="margin-top:8px">预热：' + d.warm.done + ' / ' + d.warm.total + (d.warm.running ? '（进行中）' : '（已完成）') + (d.warm.error ? ' · ' + esc(d.warm.error) : '') + '</div>' : '');
+            (d.warm && d.warm.total ? '<div class="small" style="margin-top:8px">预热：' + d.warm.done + ' / ' + d.warm.total + (d.warm.running ? '（进行中）' : '（已完成）') + (d.warm.error ? ' · ' + esc(d.warm.error) : '') + '</div>' : '') +
+            '<div style="margin-top:14px"><div class="lbl">试听内容 <span class="small" id="lyx-voice-count" style="font-weight:400">0 / 30</span></div>' +
+              '<div class="hint" style="margin-bottom:6px">留空就挑一句已录好的；自己写的话要现场合成（CPU 约 150 秒）</div>' +
+              '<input id="lyx-voice-text" type="text" maxlength="30" placeholder="比如：早啊，今天想我了吗" style="width:100%;box-sizing:border-box;text-align:left" /></div>';
           const sel = root.querySelector('#lyx-voice-engine');
           if (sel) sel.onchange = function () {
             fetch('/lanyuxi/voice/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ engine: sel.value }) })
@@ -475,14 +478,18 @@ window.__ModuleLoader__.load({
               .catch(function () { lyxToast('接口不可用'); });
             setTimeout(function () { sw.disabled = false; }, 4000);
           };
+          const textInput = root.querySelector('#lyx-voice-text');
+          const counter = root.querySelector('#lyx-voice-count');
+          if (textInput && counter) textInput.oninput = function () { counter.textContent = textInput.value.length + ' / 30'; };
           const testBtn = root.querySelector('#lyx-voice-test');
           if (testBtn) testBtn.onclick = function () {
-            testBtn.disabled = true; testBtn.textContent = '合成中…';
-            fetch('/lanyuxi/voice/test?text=' + encodeURIComponent('哼，我早就想学了。')).then(function (r) { return r.json(); }).then(function (x) {
-              testBtn.disabled = false; testBtn.textContent = '试听一句';
+            const want = textInput ? textInput.value.trim() : '';
+            testBtn.disabled = true; testBtn.textContent = want ? '合成中…（最长约 2 分钟）' : '合成中…';
+            fetch('/lanyuxi/voice/test' + (want ? ('?text=' + encodeURIComponent(want)) : '')).then(function (r) { return r.json(); }).then(function (x) {
+              testBtn.disabled = false; testBtn.textContent = '试听';
               if (x && x.ok && x.pending) { lyxToast(x.hint || '正在合成，稍后再点一次'); return; }
               lyxToast(x && x.ok ? ('用 ' + x.engine + ' 听到的是：' + (x.text || '') + '（' + x.file.split('\\').pop() + '）') : ('失败：' + ((x && x.error) || '未知')));
-            }).catch(function () { testBtn.disabled = false; testBtn.textContent = '试听一句'; lyxToast('接口不可用'); });
+            }).catch(function () { testBtn.disabled = false; testBtn.textContent = '试听'; lyxToast('接口不可用或超时（现场合成可能要 2 分钟）'); });
           };
         }
         function load() {
