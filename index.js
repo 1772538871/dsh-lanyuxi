@@ -1606,6 +1606,15 @@ export function apply(ctx, rawConfig) {
           const alive = await engineAlive()
           return send(200, { ok: true, alive, state: voiceState })
         }
+        if (url.pathname === "/lanyuxi/voice/audio") {
+          const name = url.searchParams.get("name") || ""
+          if (!/^[a-f0-9]{8,32}\.(wav|mp3)$/i.test(name)) return send(400, { error: "文件名不合法" })
+          const file = join(cacheDir(), name)
+          if (!existsSync(file)) return send(404, { error: "没有这个文件" })
+          const buf = readFileSync(file)
+          const type = name.endsWith(".mp3") ? "audio/mpeg" : "audio/wav"
+          return send(200, buf, type)
+        }
         if (url.pathname === "/lanyuxi/voice/test") {
           try {
             const explicit = (url.searchParams.get("text") || "").trim()

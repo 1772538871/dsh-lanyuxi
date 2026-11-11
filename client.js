@@ -449,7 +449,8 @@ window.__ModuleLoader__.load({
             '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center">' +
               '<span class="lbl" style="margin:0">引擎开关</span>' +
               '<button class="sw' + (d.process.status === 'running' ? ' on' : '') + '" id="lyx-voice-switch" role="switch" aria-label="引擎开关"></button>' +
-              '<button class="btn" id="lyx-voice-test" style="margin-left:12px">试听一句</button>' +
+              '<button class="btn" id="lyx-voice-test" style="margin-left:12px">试听</button>' +
+              '<button class="btn ghost" id="lyx-voice-speaker" title="再放一次" style="display:none;padding:6px 10px">🔊 播放</button>' +
               '<span class="small" style="margin-left:auto">缓存 ' + (d.cache || 0) + ' 句 · 参考音频 ' + (d.samples || 0) + ' 个</span>' +
             '</div>' +
             (d.warm && d.warm.total ? '<div class="small" style="margin-top:8px">预热：' + d.warm.done + ' / ' + d.warm.total + (d.warm.running ? '（进行中）' : '（已完成）') + (d.warm.error ? ' · ' + esc(d.warm.error) : '') + '</div>' : '') +
