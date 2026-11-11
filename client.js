@@ -45,6 +45,9 @@ window.__ModuleLoader__.load({
 .lyx-scope .lyx-rail .ic{display:inline-flex;width:16px;height:16px;flex:0 0 auto}
 .lyx-scope .lyx-rail .ic svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 .lyx-scope .lyx-main{min-width:0}
+@keyframes lyxspin{to{transform:rotate(360deg)}}
+.lyx-scope .lyx-spin{display:inline-block;width:12px;height:12px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:lyxspin .8s linear infinite;vertical-align:-2px;margin-right:6px}
+.lyx-scope .lyx-spin.dark{border-color:rgba(91,140,255,.35);border-top-color:#5b8cff}
 .lyx-scope .legend{display:flex;flex-wrap:wrap;justify-content:center;gap:6px 12px;max-width:560px;margin:0 auto}
 .lyx-scope .legend .lg{flex:0 1 46%;min-width:0;white-space:normal;line-height:1.4;font-size:12px;justify-content:flex-start}
 .lyx-scope .lyx-rail .navbtn.on{border-color:rgba(91,140,255,.45)}
@@ -352,7 +355,7 @@ window.__ModuleLoader__.load({
         const biliCard = biliPill ? biliPill.closest('.card') : cards[1];
         if (!biliCard) return;
         function paint(d) {
-          if (dead || !d) return;
+          if (dead || !d || synthesizing) return;
           const pill = biliCard.querySelector('#st-bili');
           if (pill) {
             pill.className = 'pill ' + (d.loggedIn ? 'ok' : 'off');
@@ -419,6 +422,7 @@ window.__ModuleLoader__.load({
         const root = document.querySelector('.lyx-scope #view-voice');
         if (!root) return;
         let dead = false;
+        let synthesizing = false;
         const card1 = root.querySelector('.card');
         if (!card1) return;
         function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
@@ -435,7 +439,7 @@ window.__ModuleLoader__.load({
           return '未运行';
         }
         function paint(d) {
-          if (dead || !d) return;
+          if (dead || !d || synthesizing) return;
           card1.innerHTML =
             '<h3>语音引擎 <span class="pill ' + (d.process.status === 'running' || d.selectedEngine !== 'gpt-sovits' ? 'ok' : 'warn') + '">' + esc(statusText(d)) + '</span></h3>' +
             '<div style="margin-top:10px"><div class="lbl">用哪个引擎</div><div class="hint" style="margin-bottom:6px">GPT-SoVITS 需要本机安装；换台电脑就选 edge-tts 或 SAPI</div>' +
@@ -457,7 +461,7 @@ window.__ModuleLoader__.load({
               '<button class="btn ghost" id="lyx-voice-speaker" title="再放一次" style="display:none;padding:6px 10px">🔊 播放</button>' +
               '<span class="small" style="margin-left:auto">缓存 ' + (d.cache || 0) + ' 句 · 参考音频 ' + (d.samples || 0) + ' 个</span>' +
             '</div>' +
-            (d.warm && d.warm.total ? '<div class="small" style="margin-top:8px">预热：' + d.warm.done + ' / ' + d.warm.total + (d.warm.running ? '（进行中）' : '（已完成）') + (d.warm.error ? ' · ' + esc(d.warm.error) : '') + '</div>' : '') +
+            (d.warm && d.warm.total ? '<div class="small" style="margin-top:8px">预热：' + d.warm.done + ' / ' + d.warm.total + (d.warm.running ? '<span class="lyx-spin dark" style="width:10px;height:10px;vertical-align:-1px"></span>进行中' : '已完成') + (d.warm.error ? ' · ' + esc(d.warm.error) : '') + '</div>' : '') +
             '<div style="margin-top:14px"><div class="lbl">试听内容 <span class="small" id="lyx-voice-count" style="font-weight:400">0 / 30</span></div>' +
               '<div class="hint" style="margin-bottom:6px">留空就挑一句已录好的；自己写的话要现场合成（CPU 约 150 秒）</div>' +
               '<input id="lyx-voice-text" type="text" maxlength="30" placeholder="比如：早啊，今天想我了吗" style="width:100%;box-sizing:border-box;text-align:left" /></div>';
@@ -521,9 +525,18 @@ window.__ModuleLoader__.load({
           const testBtn = root.querySelector('#lyx-voice-test');
           if (testBtn) testBtn.onclick = function () {
             const want = textInput ? textInput.value.trim() : '';
-            testBtn.disabled = true; testBtn.textContent = want ? '合成中…（最长约 2 分钟）' : '合成中…';
+            synthesizing = true;
+            testBtn.disabled = true;
+            const started = Date.now();
+            function tick() {
+              const sec = Math.round((Date.now() - started) / 1000);
+              testBtn.innerHTML = '<span class="lyx-spin"></span>合成中 ' + sec + 's';
+            }
+            tick();
+            const ticker = setInterval(tick, 1000);
+            const stopTicker = function () { clearInterval(ticker); synthesizing = false; testBtn.textContent = '试听'; testBtn.disabled = false; };
             fetch('/lanyuxi/voice/test' + (want ? ('?text=' + encodeURIComponent(want)) : '')).then(function (r) { return r.json(); }).then(function (x) {
-              testBtn.disabled = false; testBtn.textContent = '试听';
+              stopTicker();
               if (x && x.ok && x.pending) { lyxToast(x.hint || '正在合成，稍后再点一次'); return; }
               if (x && x.ok) {
                 const name = x.file.split(/[\\/]/).pop();
@@ -533,7 +546,7 @@ window.__ModuleLoader__.load({
               } else {
                 lyxToast('失败：' + ((x && x.error) || '未知'));
               }
-            }).catch(function () { testBtn.disabled = false; testBtn.textContent = '试听'; lyxToast('接口不可用或超时（现场合成可能要 2 分钟）'); });
+            }).catch(function () { stopTicker(); lyxToast('接口不可用或超时（现场合成可能要 2 分钟）'); });
           };
         }
         function load() {
@@ -766,7 +779,7 @@ window.__ModuleLoader__.load({
           return fetch('/lanyuxi/brakes?action=' + action, { method: 'POST' }).then(function (r) { return r.json(); });
         }
         function paint(d) {
-          if (dead || !d) return;
+          if (dead || !d || synthesizing) return;
           const btns = Array.prototype.slice.call(root.querySelectorAll('button'));
           const muteBtn = btns.filter(function (b) { return b.textContent.indexOf('静音') >= 0 || b.textContent.indexOf('取消静音') >= 0; })[0];
           const socialBtn = btns.filter(function (b) { return b.textContent.indexOf('社交') >= 0; })[0];
