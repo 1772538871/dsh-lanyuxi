@@ -528,13 +528,23 @@ window.__ModuleLoader__.load({
             synthesizing = true;
             testBtn.disabled = true;
             const started = Date.now();
+            let prog = root.querySelector('#lyx-voice-progress');
+            if (!prog) {
+              prog = document.createElement('div');
+              prog.id = 'lyx-voice-progress';
+              prog.style.cssText = 'margin-top:10px;padding:10px 12px;border-radius:9px;background:rgba(91,140,255,.12);border:1px solid rgba(91,140,255,.35);color:#dfe7ff;font-size:12.5px;display:flex;align-items:center;gap:8px';
+              card1.appendChild(prog);
+            }
             function tick() {
               const sec = Math.round((Date.now() - started) / 1000);
+              const pct = Math.min(96, Math.round(sec / 150 * 100));
               testBtn.innerHTML = '<span class="lyx-spin"></span>合成中 ' + sec + 's';
+              prog.innerHTML = '<span class="lyx-spin"></span><span>正在合成语音…已用 ' + sec + ' 秒（预计 150 秒）</span>' +
+                '<span style="margin-left:auto;color:#8ea6c9">' + pct + '%</span>';
             }
             tick();
             const ticker = setInterval(tick, 1000);
-            const stopTicker = function () { clearInterval(ticker); synthesizing = false; testBtn.textContent = '试听'; testBtn.disabled = false; };
+            const stopTicker = function () { clearInterval(ticker); synthesizing = false; testBtn.textContent = '试听'; testBtn.disabled = false; const p = root.querySelector('#lyx-voice-progress'); if (p) p.remove(); };
             fetch('/lanyuxi/voice/test' + (want ? ('?text=' + encodeURIComponent(want)) : '')).then(function (r) { return r.json(); }).then(function (x) {
               stopTicker();
               if (x && x.ok && x.pending) { lyxToast(x.hint || '正在合成，稍后再点一次'); return; }
