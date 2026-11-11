@@ -446,10 +446,10 @@ window.__ModuleLoader__.load({
               '</select></div>' +
             '<div style="margin-top:12px"><div class="lbl">GPT-SoVITS 安装路径</div><div class="hint" style="margin-bottom:6px">' + (d.installOk ? '已找到 runtime\\python.exe 与 api_v2.py' : '这个路径下没找到引擎文件') + '</div>' +
               '<input id="lyx-voice-dir" type="text" value="' + esc(d.installDir) + '" style="width:100%;box-sizing:border-box;text-align:left" /></div>' +
-            '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">' +
-              '<button class="btn primary" id="lyx-voice-start">启动引擎</button>' +
-              '<button class="btn ghost" id="lyx-voice-stop">关闭引擎</button>' +
-              '<button class="btn" id="lyx-voice-test">试听一句</button>' +
+            '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center">' +
+              '<span class="lbl" style="margin:0">引擎开关</span>' +
+              '<button class="sw' + (d.process.status === 'running' ? ' on' : '') + '" id="lyx-voice-switch" role="switch" aria-label="引擎开关"></button>' +
+              '<button class="btn" id="lyx-voice-test" style="margin-left:12px">试听一句</button>' +
               '<span class="small" style="margin-left:auto">缓存 ' + (d.cache || 0) + ' 句 · 参考音频 ' + (d.samples || 0) + ' 个</span>' +
             '</div>' +
             (d.warm && d.warm.total ? '<div class="small" style="margin-top:8px">预热：' + d.warm.done + ' / ' + d.warm.total + (d.warm.running ? '（进行中）' : '（已完成）') + (d.warm.error ? ' · ' + esc(d.warm.error) : '') + '</div>' : '');
@@ -465,22 +465,23 @@ window.__ModuleLoader__.load({
               .then(function (r) { return r.json(); }).then(function (x) { lyxToast(x && x.ok ? '路径已保存，正在尝试启动' : '保存失败'); setTimeout(load, 1500); });
           };
           if (dir) dir.onblur = saveDir;
-          const startBtn = root.querySelector('#lyx-voice-start');
-          if (startBtn) startBtn.onclick = function () {
-            startBtn.disabled = true; startBtn.textContent = '启动中…';
-            fetch('/lanyuxi/voice/engine?action=start', { method: 'POST' }).then(function (r) { return r.json(); }).then(function () { setTimeout(load, 3000); });
-            setTimeout(function () { startBtn.disabled = false; startBtn.textContent = '启动引擎'; }, 4000);
-          };
-          const stopBtn = root.querySelector('#lyx-voice-stop');
-          if (stopBtn) stopBtn.onclick = function () {
-            fetch('/lanyuxi/voice/engine?action=stop', { method: 'POST' }).then(function (r) { return r.json(); }).then(function () { load(); });
+          const sw = root.querySelector('#lyx-voice-switch');
+          if (sw) sw.onclick = function () {
+            const running = d.process.status === 'running' || d.process.status === 'starting';
+            sw.disabled = true;
+            fetch('/lanyuxi/voice/engine?action=' + (running ? 'stop' : 'start'), { method: 'POST' })
+              .then(function (r) { return r.json(); })
+              .then(function () { lyxToast(running ? '已关闭引擎' : '正在启动，约 40–60 秒'); setTimeout(load, 3000); load(); })
+              .catch(function () { lyxToast('接口不可用'); });
+            setTimeout(function () { sw.disabled = false; }, 4000);
           };
           const testBtn = root.querySelector('#lyx-voice-test');
           if (testBtn) testBtn.onclick = function () {
             testBtn.disabled = true; testBtn.textContent = '合成中…';
             fetch('/lanyuxi/voice/test?text=' + encodeURIComponent('哼，我早就想学了。')).then(function (r) { return r.json(); }).then(function (x) {
               testBtn.disabled = false; testBtn.textContent = '试听一句';
-              lyxToast(x && x.ok ? ('用 ' + x.engine + ' 合成好了：' + x.file) : ('失败：' + ((x && x.error) || '未知')));
+              if (x && x.ok && x.pending) { lyxToast(x.hint || '正在合成，稍后再点一次'); return; }
+              lyxToast(x && x.ok ? ('用 ' + x.engine + ' 听到的是：' + (x.text || '') + '（' + x.file.split('\\').pop() + '）') : ('失败：' + ((x && x.error) || '未知')));
             }).catch(function () { testBtn.disabled = false; testBtn.textContent = '试听一句'; lyxToast('接口不可用'); });
           };
         }

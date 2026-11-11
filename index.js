@@ -1296,7 +1296,10 @@ export function apply(ctx, rawConfig) {
   /** 引擎顺序：配置指定 → 否则 GPT-SoVITS / edge-tts / SAPI 依次尝试，哪个成功用哪个。 */
   async function engineChain() {
     const want = settings.voiceEngine || config.voiceEngine || "auto"
-    if (want !== "auto") return [want]
+    if (want !== "auto") {
+      const rest = ["edge-tts", "sapi"].filter((e) => e !== want)
+      return [want].concat(rest)
+    }
     const list = []
     if (await probeGptSovits()) list.push("gpt-sovits")
     if (probeEdgeTts()) list.push("edge-tts")
@@ -1604,13 +1607,44 @@ export function apply(ctx, rawConfig) {
           return send(200, { ok: true, alive, state: voiceState })
         }
         if (url.pathname === "/lanyuxi/voice/test") {
-          const q = url.searchParams.get("text") || "早啊，起床了没。"
           try {
-            const built = await synthesize(q, "日常")
-            diag.voiceEngine = built.engine
-            return send(200, { ok: true, engine: built.engine, file: built.file, cached: Boolean(built.cached) })
+            const explicit = url.searchParams.get("text") || ""
+            const phrasesFile = join(voiceDir(), "phrases.txt")
+            const phrases = existsSync(phrasesFile)
+              ? readFileSync(phrasesFile, "utf8").split(/\r?\n/).map((s) => s.trim()).filter((s) => s && !s.startsWith("#"))
+              : []
+            const engine = settings.voiceEngine === "auto" ? await resolveVoiceEngine() : settings.voiceEngine
+            const cachedOne = (list) => list.find((line) => existsSync(cachePath(engine, line)) && statSync(cachePath(engine, line)).size > 1000)
+            let q = explicit
+            if (!q) {
+              const hit = cachedOne(phrases)
+              if (!hit && phrases.length) {
+                // 没有缓存就用第一句，后台转，转好再点一次
+                const target = phrases[0]
+                const out = cachePath(engine, target)
+                void (async () => {
+                  try {
+                    if (engine === "gpt-sovits") await synthGptSovits(target, out)
+                    else if (engine === "edge-tts") synthEdgeTts(target, out)
+                    else synthSapi(target, out)
+                    diag.voiceTest = "ok"
+                  } catch (error) { diag.voiceTest = String(error) }
+                })()
+                return send(200, { ok: true, pending: true, engine, text: target, hint: "这句还没录，正在后台合成（约 150 秒），过一会儿再点一次" })
+              }
+              q = hit || phrases[0] || "早啊。"
+            }
+            const out = cachePath(engine, q)
+            if (existsSync(out) && statSync(out).size > 1000) {
+              return send(200, { ok: true, engine, file: out, text: q, cached: true })
+            }
+            // 明确指定了文字且没缓存：直接合成（会等，最多 150 秒）
+            if (engine === "gpt-sovits") await synthGptSovits(q, out)
+            else if (engine === "edge-tts") synthEdgeTts(q, out)
+            else synthSapi(q, out)
+            return send(200, { ok: true, engine, file: out, text: q, cached: false })
           } catch (error) {
-            return send(500, { ok: false, error: String(error) })
+            return send(500, { ok: false, error: String(error), tried: diag.voiceErrors || [] })
           }
         }
         if (url.pathname === "/lanyuxi/voice/warm") {
