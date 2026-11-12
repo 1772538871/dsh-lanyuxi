@@ -312,15 +312,8 @@ export function apply(ctx, rawConfig) {
         const now2 = new Date()
         const week = "日一二三四五六"[now2.getDay()]
         const head = `${now2.getFullYear()}年${now2.getMonth() + 1}月${now2.getDate()}日 星期${week} 天气${"（写 晴/多云/小雨，后面跟 有点热/凉快/冷，不用冒号）"} 心情${"（随手写一个词，如 一般 / 开心 / 烦）"}`
-        diaryTask = [
-          `【今天的第一件事】现在先写日记，写两篇，都写到 ${base}\\diary\\ 下：`,
-          `1) 表日记：${base}\\diary\\to-owner\\${month}\\${dayName}.md —— 给主人看的小学生作文，200 字以内。`,
-          `2) 里日记：${base}\\diary\\private\\${month}\\${dayName}.md —— 只给自己看，可以嘴硬、可以承认在意。`,
-          `两篇的第一行就照这个样式写（日期 星期 天气 心情），整行不出现冒号，天气只写冷热凉快，不要写几度：`,
-          head,
-          `第二行空一行，然后自由写正文（不一定要「今天」开头，想怎么写就怎么写），写昨天跟他说了什么、他哪句话惹你笑了或气到你了。`,
-          `写完再回这条消息；日记内容不要贴回 QQ。`,
-        ].join("\n")
+        // 只留一个标记：写法、路径、格式都在系统提示的「日记与存档」那一节里（每轮求值，永不重复堆在聊天里）
+        diaryTask = `【今天的第一件事】${head}`
         // 记忆 v0：真的下发了日记任务，才把这条记一笔
         try {
           logEvent(config.homeDir || "E:\\dsh-foundry\\lanyuxi-home", {
@@ -342,11 +335,7 @@ export function apply(ctx, rawConfig) {
     if (sessionState.lastPersonaSampleWeek !== weekKey) {
       sessionState.lastPersonaSampleWeek = weekKey
       saveSessionState()
-      personaTask = [
-        `【这周要记的一件事】用 personality_record 记一份你对自己的观察（${weekKey}）：五个维度各给 0 到 1 的一个数——initiative 主动、curiosity 好奇、humor 幽默、clinging 黏人、tsundere 嘴硬。`,
-        "别为了填而填：没变化的那几维就别写，写一两个也够；why 一句话说清这周哪件事让你这么打分。",
-        "记完再回这条消息，这件事不用跟他说。",
-      ].join("\n")
+      personaTask = `【这周记一笔】${weekKey}`
     }
     const seg = segmentInfo(text.length)
     const prevId = (sessionState.current && sessionState.current.prevId) || ""
@@ -693,6 +682,26 @@ export function apply(ctx, rawConfig) {
           else lines.push("这是第一段会话，没有更早的记录。")
           lines.push(`现在时间：${stampNow()}`)
           return lines.join("\n")
+        },
+      })
+      sp.section({
+        name: "lanyuxi-diary",
+        order: 950,
+        text: function () {
+          const now = new Date()
+          const week = "日一二三四五六"[now.getDay()]
+          const head = now.getFullYear() + "年" + (now.getMonth() + 1) + "月" + now.getDate() + "日 星期" + week +
+            " 天气（写 晴/多云/小雨，后面跟 有点热/凉快/冷，不用冒号） 心情（随手一个词，如 一般 / 开心 / 烦）"
+          return [
+            "【日记与存档的规矩】",
+            "看到「【今天的第一件事】」：先用 diary_write 把今天两篇日记写完，再回那条 QQ 消息。",
+            "写日记只用 diary_write 工具，一次给两篇：to_owner 是给主人看的表日记（小学生口吻，200 字以内），private 是只给自己看的里日记（可以嘴硬、可以承认在意）。",
+            "两篇的第一行都照这个样式写，整行不出现冒号：",
+            head,
+            "第二行空一行，然后自由写正文（不一定要「今天」开头），写昨天跟他说了什么、他哪句话惹你笑了或气到你了。日记正文不要贴回 QQ。",
+            "落盘由插件负责：你不需要、也不要用文件工具写任何文件。记忆用 memory_save，表情用 sticker_save，日记用 diary_write。",
+            "看到「【这周记一笔】」：用 personality_record 记一次对自己的观察——五个 0~1 的维度只写有变化的，why 一句话说明。别为了填而填，这件事也不用跟他说。",
+          ].join("\n")
         },
       })
       systemSectionReady = true
@@ -1225,6 +1234,46 @@ export function apply(ctx, rawConfig) {
       return { ok: false, error: String(error) }
     }
   }
+
+  // —— 她能用的工具：写日记（插件落盘，不走她的文件权限，所以不会再弹审批） ——
+  ctx.tools.register({
+    name: "diary_write",
+    description:
+      "把今天的日记写下来，两篇一起给。to_owner 是给主人看的表日记（小学生口吻，200 字内），private 是只给自己看的里日记。两篇第一行都要写「日期 星期 天气 心情」，空一行再写正文。插件负责落盘——你不用也不要用文件工具去写文件。",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        to_owner: { type: "string", description: "表日记全文，第一行例：2026年11月12日 星期四 天气晴，有点热 心情一般" },
+        private: { type: "string", description: "里日记全文，格式同上，可以嘴硬、可以承认在意。" },
+      },
+      required: ["to_owner", "private"],
+    },
+    output: { schema: { type: "string" }, render: (_args, value) => [{ type: "text", text: value }] },
+    async execute(args) {
+      const home = config.homeDir || "E:\\dsh-foundry\\lanyuxi-home"
+      const now = new Date()
+      const month = now.getFullYear() + "-" + z2(now.getMonth() + 1)
+      const day = ymd(now)
+      const saved = []
+      for (const [kind, body] of [["to-owner", args?.to_owner], ["private", args?.private]]) {
+        const text = String(body ?? "").replace(/\r\n/g, "\n").trim()
+        if (!text) throw new Error(kind === "to-owner" ? "表日记是空的，写点东西再给我" : "里日记是空的，写点东西再给我")
+        if (text.length > 1200) throw new Error("日记太长了（超过 1200 字），压到 200 字左右再写一次")
+        const dir = join(home, "diary", kind, month)
+        mkdirSync(dir, { recursive: true })
+        const file = join(dir, day + ".md")
+        writeFileSync(file, text + "\n", "utf8")
+        saved.push(file)
+      }
+      try {
+        logEvent(home, { kind: "diary", platform: "local", who: "她", perms: "system", summary: "写完今天的两篇日记", ref: day })
+      } catch (error) {
+        diag.memoryError = String(error)
+      }
+      return "写好了，两篇都落盘了：" + saved.join("；")
+    },
+  })
 
   // —— 她能用的工具：收藏表情 ——
   ctx.tools.register({
@@ -1920,16 +1969,11 @@ export function apply(ctx, rawConfig) {
             saveSessionState()
             const base = config.homeDir || "E:\\dsh-foundry\\lanyuxi-home"
             const now = new Date()
-            const month = now.getFullYear() + "-" + z2(now.getMonth() + 1)
-            const day = ymd(now)
             const week = "日一二三四五六"[now.getDay()]
-            const text = [
-              `【补写今天的日记】现在写两篇，都写到 ${base}\\diary\\ 下：`,
-              `1) 表日记：${base}\\diary\\to-owner\\${month}\\${day}.md（给主人看，小学生作文，200 字内）`,
-              `2) 里日记：${base}\\diary\\private\\${month}\\${day}.md（只给自己看）`,
-              `第一行原样：${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 星期${week} 天气：（晴/多云 + 热/凉快/冷） 心情：（一个词）`,
-              `空一行再写正文，自由发挥；写好后只回复「写好了」，不要贴日记内容。`,
-            ].join("\n")
+            const head = now.getFullYear() + "年" + (now.getMonth() + 1) + "月" + now.getDate() + "日 星期" + week +
+              " 天气（晴/多云 + 热/凉快/冷，不用冒号） 心情（一个词）"
+            // 只发标记：写法与落盘都在系统提示「日记与存档的规矩」+ diary_write 工具里
+            const text = "【今天的第一件事】" + head
             const seg = segmentInfo(0)
             await deliver(text, seg.id)
             // 记忆 v0：面板让她补写，也记一笔（失败不影响她回话）
