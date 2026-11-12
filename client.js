@@ -423,6 +423,7 @@ window.__ModuleLoader__.load({
         if (!root) return;
         let dead = false;
         let synthesizing = false;
+        let lastVoice = null;
         const card1 = root.querySelector('.card');
         if (!card1) return;
         function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
@@ -470,6 +471,15 @@ window.__ModuleLoader__.load({
             fetch('/lanyuxi/voice/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ engine: sel.value }) })
               .then(function (r) { return r.json(); }).then(function () { load(); });
           };
+          const sp = root.querySelector('#lyx-voice-speaker');
+          if (sp && lastVoice) {
+            sp.style.display = 'inline-flex';
+            sp.title = lastVoice.text || lastVoice.name;
+            sp.onclick = function () {
+              audioEl.src = '/lanyuxi/voice/audio?name=' + encodeURIComponent(lastVoice.name);
+              audioEl.play().catch(function () { lyxToast('播放失败，再点一次'); });
+            };
+          }
           const langBtn = root.querySelector('#lyx-voice-lang');
           if (langBtn) langBtn.onclick = function () {
             const order = ['zh', 'ja', 'en'];
@@ -518,6 +528,7 @@ window.__ModuleLoader__.load({
             document.body.appendChild(audioEl);
           }
           function playVoice(name, text) {
+            lastVoice = { name: name, text: text };
             const speaker = root.querySelector('#lyx-voice-speaker');
             if (speaker) {
               speaker.style.display = 'inline-flex';
@@ -553,7 +564,18 @@ window.__ModuleLoader__.load({
             tick();
             const ticker = setInterval(tick, 1000);
             const stopTicker = function () { clearInterval(ticker); synthesizing = false; testBtn.textContent = '试听'; testBtn.disabled = false; const p = root.querySelector('#lyx-voice-progress'); if (p) p.remove(); };
-            fetch('/lanyuxi/voice/synth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: want || '早啊，起床了没。' }) })
+            const target = want || '早啊，起床了没。';
+            fetch('/lanyuxi/voice/cached?text=' + encodeURIComponent(target)).then(function (r) { return r.json(); }).then(function (c) {
+              if (c && c.ok && c.cached) {
+                stopTicker();
+                playVoice(c.name, target);
+                lyxToast('已录过这句，直接播放（不用再生成）');
+                return;
+              }
+              startJob(target);
+            }).catch(function () { startJob(target); });
+            function startJob(target) {
+            fetch('/lanyuxi/voice/synth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: target }) })
               .then(function (r) { return r.json(); })
               .then(function (job) {
                 if (!job || !job.ok) { stopTicker(); lyxToast('起步失败：' + ((job && job.error) || '未知')); return; }
@@ -579,6 +601,7 @@ window.__ModuleLoader__.load({
                 }, 2000);
               })
               .catch(function () { stopTicker(); lyxToast('接口不可用'); });
+            }
           };
         }
         function load() {

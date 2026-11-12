@@ -1678,6 +1678,15 @@ export function apply(ctx, rawConfig) {
           const alive = await engineAlive()
           return send(200, { ok: true, alive, state: voiceState })
         }
+        if (url.pathname === "/lanyuxi/voice/cached") {
+          const text = (url.searchParams.get("text") || "").trim()
+          const lang = url.searchParams.get("lang") || currentLang()
+          if (!text) return send(400, { ok: false, error: "缺少 text" })
+          const engine = settings.voiceEngine === "auto" ? await resolveVoiceEngine() : settings.voiceEngine
+          const file = cachePath(engine, text, lang)
+          const hit = existsSync(file) && statSync(file).size > 48000
+          return send(200, { ok: true, cached: hit, engine, lang, file: hit ? file : "", name: hit ? basename(file) : "" })
+        }
         if (url.pathname === "/lanyuxi/voice/synth") {
           if (req.method === "POST") {
             let body = ""
