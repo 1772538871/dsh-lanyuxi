@@ -643,7 +643,10 @@ export function apply(ctx, rawConfig) {
   function setupAgentPrompt(agentCtx) {
     try {
       const sp = agentCtx && (typeof agentCtx.get === "function" ? agentCtx.get("systemPrompt") : agentCtx.systemPrompt)
-      if (!sp || typeof sp.section !== "function") return
+      if (!sp || typeof sp.section !== "function") {
+        diag.systemSection = "no-api:" + (agentCtx ? typeof agentCtx.get : "no-context")
+        return
+      }
       sp.section({
         name: "lanyuxi-persona",
         order: 200,
@@ -716,7 +719,20 @@ export function apply(ctx, rawConfig) {
     const agents = ctx.get("agents")
     const key = sessionId || (sessionState.current ? sessionState.current.id : "lanyuxi-msg-000")
     let agent = agents.get(key)
-    if (agent) { diag.freshSession = false; return agent }
+    if (agent) {
+      diag.freshSession = false
+      // 已存在的 agent 不会再跑 setup：这里补挂一次，否则人格卡/日记规矩都进不了系统提示，
+      // 只能退回"把人格塞进用户消息"——那正是消息变得又长又啰嗦的原因。
+      if (!systemSectionReady) {
+        try {
+          setupAgentPrompt(agent)
+          if (!systemSectionReady) diag.systemSection = "no-api:已有 agent 上没有 systemPrompt 接口"
+        } catch (error) {
+          diag.systemSection = "failed: " + String(error)
+        }
+      }
+      return agent
+    }
     try {
       let selection
       try {
