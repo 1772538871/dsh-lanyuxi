@@ -337,6 +337,15 @@ export function apply(ctx, rawConfig) {
       saveSessionState()
       personaTask = `【这周记一笔】${weekKey}`
     }
+    // 当前段缺摘要（历史遗留）就补算一次：让 -003 这类老段也能拿到上一段大意
+    if (sessionState.current && sessionState.current.prevId && !Array.isArray(sessionState.current.prevSummary)) {
+      try {
+        sessionState.current.prevSummary = buildPrevSummary()
+        saveSessionState()
+      } catch (error) {
+        diag.prevSummaryError = String(error)
+      }
+    }
     // 系统提示挂不上的唯一自救方式：新建一段会话（只有 create 那一刻能拿到 scoped 上下文）。
     // 只试一次——试过还挂不上就退回"人格塞进消息"的旧路，绝不允许一条消息换一段。
     let rebuild = false
@@ -517,6 +526,42 @@ export function apply(ctx, rawConfig) {
   }
 
   /** 纯按体量切：装不下才开下一段，与日历无关。 */
+  /** 上一段的大意：优先取她那几天写的表日记（她自己的话），没有就退回记忆本。零 LLM 成本。 */
+  function buildPrevSummary(daysBack = 5) {
+    const home = config.homeDir || "E:\\dsh-foundry\\lanyuxi-home"
+    const out = []
+    const now = new Date()
+    for (let i = 0; i < daysBack; i += 1) {
+      const d = new Date(now.getTime() - i * 86400000)
+      const month = d.getFullYear() + "-" + z2(d.getMonth() + 1)
+      const file = join(home, "diary", "to-owner", month, ymd(d) + ".md")
+      if (!existsSync(file)) continue
+      let text = ""
+      try { text = readFileSync(file, "utf8") } catch { continue }
+      const rows = text.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
+      const body = rows.slice(1).join(" ").trim() || rows[0] || ""
+      if (body) out.push(d.getMonth() + 1 + "月" + d.getDate() + "日：" + body.slice(0, 60))
+    }
+    if (out.length) return out.reverse()
+    try {
+      const rows = []
+      const mfile = join(home, "memory", "memories.jsonl")
+      if (existsSync(mfile)) {
+        for (const line of readFileSync(mfile, "utf8").split(/\r?\n/)) {
+          const s = line.trim()
+          if (!s) continue
+          try {
+            const o = JSON.parse(s)
+            if (o && o.content) rows.push(o)
+          } catch {}
+        }
+      }
+      return rows.slice(-5).reverse().map((o) => String(o.content).slice(0, 60))
+    } catch {
+      return []
+    }
+  }
+
   function segmentInfo(textLength = 0, forceNew = false) {
     const now = new Date()
     const day = ymd(now)
@@ -530,13 +575,17 @@ export function apply(ctx, rawConfig) {
     let fresh = false
     let newDay = false
     if (!cur || forceNew || cur.chars + textLength > limit) {
+      const prevSeg = cur
       sessionState.seq = (sessionState.seq || 0) + 1
+      let prevSummary = []
+      try { if (prevSeg) prevSummary = buildPrevSummary() } catch (error) { diag.prevSummaryError = String(error) }
       cur = {
         id: "lanyuxi-msg2-" + String(sessionState.seq).padStart(3, "0"),
         chars: 0,
         firstDay: day,
         lastDay: day,
-        prevId: cur ? cur.id : "",
+        prevId: prevSeg ? prevSeg.id : "",
+        prevSummary,
         titleBase: "",
       }
       fresh = true
@@ -702,6 +751,18 @@ export function apply(ctx, rawConfig) {
           else lines.push("这是第一段会话，没有更早的记录。")
           lines.push(`现在时间：${stampNow()}`)
           return lines.join("\n")
+        },
+      })
+      sp.section({
+        name: "lanyuxi-prev",
+        order: 220,
+        text: function () {
+          const cur = sessionState.current
+          if (!cur || !cur.prevId) return "这是你的第一段会话，没有更早的记录。"
+          const head = "上一段会话是 " + cur.prevId + "。"
+          const sum = Array.isArray(cur.prevSummary) ? cur.prevSummary.filter(Boolean) : []
+          if (!sum.length) return head + "你手上没有它的摘要；主人提到以前的事，先用会话检索查那个 id 再回答。"
+          return [head + "那段里你经历过这些（是摘要，不是原文）：", ...sum.map((x) => "- " + x), "要更细的内容，用会话检索查 " + cur.prevId + "，别凭印象编。"].join("\n")
         },
       })
       sp.section({
