@@ -33,6 +33,8 @@ window.__ModuleLoader__.load({
 
     /* 原型是宽屏设计，设置面板只有 ~576px：强制单列 + 禁止横向溢出 */
     const OVERRIDES = `
+.lyx-scope.scan-open .lyx-rail{visibility:hidden !important}
+.lyx-scope .mask{z-index:9999 !important}
 .lyx-scope{width:100%;max-width:100%;min-width:0;overflow-x:hidden;box-sizing:border-box;background:transparent !important}
 .lyx-scope .content{padding:0 2px}
 .lyx-scope .g2,.lyx-scope .g3,.lyx-scope .grid,.lyx-scope .cols{grid-template-columns:1fr !important}
@@ -230,6 +232,8 @@ window.__ModuleLoader__.load({
           }).catch(function () {});
         }
         function onScan() {
+          const scope = document.querySelector('.lyx-scope');
+          if (scope) scope.classList.add('scan-open');
           if (boundRef && boundRef.current) { setScan({ open: true, done: true, qr: null, status: '已经登录了 · ' + '' }); window.dispatchEvent(new CustomEvent('lyx-refresh')); return; }
           setScan({ open: true, done: false, qr: null, expiresAt: Date.now() + 300000, status: '正在启动 NapCat…' });
           fetch('/lanyuxi/start', { method: 'POST' }).then(function (r) {
@@ -238,15 +242,25 @@ window.__ModuleLoader__.load({
               if (!r.ok || !d || d.ok === false) throw new Error((d && d.error) || ('接口返回 ' + r.status));
               return d;
             });
+          }).then(function (d) {
+            const already = Boolean(d && d.already)
+            setScan(function (prev) {
+              if (!prev || prev.done) return prev;
+              return { open: true, done: false, qr: prev.qr, expiresAt: prev.expiresAt, status: already ? 'NapCat 已在运行 · 正在取二维码…' : 'NapCat 已启动 · 正在取二维码…' };
+            });
+            lyxToast(already ? 'NapCat 已在运行' : 'NapCat 已启动，正在取二维码');
           }).catch(function (e) {
             const why = e && e.message ? e.message : '面板接口不可用'
             setScan({ open: true, done: false, qr: null, status: '启动 NapCat 失败：' + why });
+            lyxToast('启动 NapCat 失败：' + why);
           });
           clearInterval(timer);
           timer = setInterval(poll, 1500);
           setTimeout(poll, 900);
         }
         function onClose() {
+          const scope = document.querySelector('.lyx-scope');
+          if (scope) scope.classList.remove('scan-open');
           setScan(null); clearInterval(timer); timer = null;
           if (lastUrl) { URL.revokeObjectURL(lastUrl); lastUrl = null; }
         }
@@ -266,6 +280,11 @@ window.__ModuleLoader__.load({
         fetch('/lanyuxi/status', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (s) {
           if (dead) return;
           boundRef.current = Boolean(s && s.connected);
+          // 不管哪条链先发现登录成功，弹窗都自己关掉
+          if (s && s.connected && document.querySelector('.lyx-scope.scan-open')) {
+            window.dispatchEvent(new CustomEvent('lyx-scan-close'));
+            lyxToast('已登录 · QQ ' + (s.selfId || ''));
+          }
           const nodes = document.querySelectorAll('.lyx-scope button[onclick*="openScan"]');
           for (let i = 0; i < nodes.length; i++) {
             const isQq = (nodes[i].getAttribute('onclick') || '').indexOf("'qq'") >= 0;
