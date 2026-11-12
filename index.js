@@ -6,7 +6,7 @@
  */
 
 import { readFileSync, existsSync, mkdirSync, writeFileSync, statSync, unlinkSync, rmdirSync, rmSync } from "node:fs"
-import { join, basename, dirname } from "node:path"
+import { join, basename, dirname, relative } from "node:path"
 import { homedir } from "node:os"
 import { readdirSync, copyFileSync, appendFileSync } from "node:fs"
 import { randomUUID, createHash } from "node:crypto"
@@ -1153,6 +1153,9 @@ export function apply(ctx, rawConfig) {
         if (!existsSync(imgPath)) throw new Error("找不到这个文件：" + imgPath)
       }
       const { type, id } = resolveTarget(args)
+      if (hasImage && type === "group" && !imageCanSend(String(args.image).trim())) {
+        throw new Error("这张图被标记为「禁外发」，不能发到群里；要给她看就私聊主人")
+      }
       const chatKey = type === "group" ? `group:${id}` : `private:${id}`
       const parts = []
       if (hasText) parts.push({ type: "text", data: { text: args.text } })
@@ -1383,6 +1386,68 @@ export function apply(ctx, rawConfig) {
         diag.memoryError = String(error)
       }
       return "写好了，两篇都落盘了：" + saved.join("；")
+    },
+  })
+
+  // —— 图片的「可外发 / 禁外发」标记（定稿第十一节要求；默认允许，只记例外） ——
+  const imagesIndexPath = () => join(config.homeDir || "E:\\dsh-foundry\\lanyuxi-home", "images", "index.json")
+  function loadImageIndex() {
+    try {
+      const obj = JSON.parse(readFileSync(imagesIndexPath(), "utf8"))
+      return obj && typeof obj === "object" ? obj : {}
+    } catch {
+      return {}
+    }
+  }
+  function saveImageIndex(obj) {
+    const file = imagesIndexPath()
+    mkdirSync(dirname(file), { recursive: true })
+    writeFileSync(file, JSON.stringify(obj, null, 2), "utf8")
+  }
+  /** 相对 images\ 的键，统一 posix 风格 */
+  const imageKey = (rel) => String(rel || "").replace(/\\/g, "/").replace(/^\/+/, "")
+  /** 这张图能不能对外发（群聊/别人）；没标记过一律允许 */
+  function imageCanSend(absPath) {
+    try {
+      const base = join(config.homeDir || "E:\\dsh-foundry\\lanyuxi-home", "images")
+      const rel = imageKey(relative(base, absPath))
+      if (!rel || rel.startsWith("..")) return true
+      const meta = loadImageIndex()[rel]
+      return !(meta && meta.canSend === false)
+    } catch {
+      return true
+    }
+  }
+  /** 标记一张图：canSend=false 表示禁外发（只给主人私聊看） */
+  function markImage(rel, canSend) {
+    const key = imageKey(rel)
+    if (!key) throw new Error("要标记哪张图？给个相对 images 的文件名")
+    const abs = join(config.homeDir || "E:\\dsh-foundry\\lanyuxi-home", "images", key)
+    if (!existsSync(abs)) throw new Error("找不到这张图：" + key)
+    const idx = loadImageIndex()
+    idx[key] = { ...(idx[key] || {}), canSend: Boolean(canSend), at: new Date().toISOString() }
+    saveImageIndex(idx)
+    return { key, canSend: Boolean(canSend) }
+  }
+
+  // —— 她能用的工具：标记图片能不能外发 ——
+  ctx.tools.register({
+    name: "image_mark",
+    description:
+      "标记一张图能不能对外发。can_send=false 表示禁外发（只能私聊给主人看，不能发到群里）。file 是相对 lanyuxi-home\\images 的文件名，比如 2026-11/2026-11-12-1234567890.jpg。",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        file: { type: "string", description: "相对 lanyuxi-home\\images 的文件名" },
+        can_send: { type: "boolean", description: "true=可以外发；false=禁外发（只给主人私聊看）" },
+      },
+      required: ["file", "can_send"],
+    },
+    output: { schema: { type: "string" }, render: (_args, value) => [{ type: "text", text: value }] },
+    async execute(args) {
+      const r = markImage(args?.file, args?.can_send)
+      return r.canSend ? "记下了：" + r.key + " → 可以外发" : "记下了：" + r.key + " → 禁外发（只能私聊给主人看）"
     },
   })
 
@@ -2304,6 +2369,19 @@ export function apply(ctx, rawConfig) {
           })
         }
         if (url.pathname === "/lanyuxi/assets") {
+          if (req.method === "POST") {
+            const file = url.searchParams.get("file")
+            const flag = url.searchParams.get("canSend")
+            if (!file || (flag !== "1" && flag !== "0")) {
+              return send(400, { ok: false, error: "要 file 和 canSend=1|0" })
+            }
+            try {
+              const r = markImage(file, flag === "1")
+              return send(200, { ok: true, ...r })
+            } catch (error) {
+              return send(400, { ok: false, error: String(error?.message || error) })
+            }
+          }
           const home = config.homeDir || "E:\\dsh-foundry\\lanyuxi-home"
           const listDir = (dir) => {
             try {
@@ -2339,7 +2417,16 @@ export function apply(ctx, rawConfig) {
               listDir(join(home, "stickers", "coy")).slice(0, 1).map((x) => ({ name: "撒娇/" + x.name, size: x.size })),
               listDir(join(home, "stickers", "fierce")).slice(0, 1).map((x) => ({ name: "凶/" + x.name, size: x.size })),
             ),
-            images: listDir(monthDir("images")).slice(0, 6).map((x) => ({ name: x.name, size: x.size, mtime: x.mtime })),
+            images: (() => {
+              const month = new Date().getFullYear() + "-" + z2(new Date().getMonth() + 1)
+              return listDir(join(home, "images", month)).slice(0, 6).map((x) => ({
+                name: x.name,
+                size: x.size,
+                mtime: x.mtime,
+                file: month + "/" + x.name,
+                canSend: imageCanSend(join(home, "images", month, x.name)),
+              }))
+            })(),
             diary: { toOwner: diaryList("to-owner"), private: diaryList("private") },
           })
         }
