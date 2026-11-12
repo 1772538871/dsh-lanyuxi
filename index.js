@@ -337,7 +337,15 @@ export function apply(ctx, rawConfig) {
       saveSessionState()
       personaTask = `【这周记一笔】${weekKey}`
     }
-    const seg = segmentInfo(text.length)
+    // 系统提示挂不上的唯一自救方式：新建一段会话（只有 create 那一刻能拿到 scoped 上下文）。
+    // 只试一次——试过还挂不上就退回"人格塞进消息"的旧路，绝不允许一条消息换一段。
+    let rebuild = false
+    if (!systemSectionReady && !rebuiltOnce && sessionState.current) {
+      rebuiltOnce = true
+      rebuild = true
+      diag.rebuilt = true
+    }
+    const seg = segmentInfo(text.length, rebuild)
     const prevId = (sessionState.current && sessionState.current.prevId) || ""
     lastActivityAt = Date.now()
     if (messageType === "private" && userId === config.ownerQq) noteOwnerReplied()
@@ -509,7 +517,7 @@ export function apply(ctx, rawConfig) {
   }
 
   /** 纯按体量切：装不下才开下一段，与日历无关。 */
-  function segmentInfo(textLength = 0) {
+  function segmentInfo(textLength = 0, forceNew = false) {
     const now = new Date()
     const day = ymd(now)
     const limit = currentLimit()
@@ -521,7 +529,7 @@ export function apply(ctx, rawConfig) {
     }
     let fresh = false
     let newDay = false
-    if (!cur || cur.chars + textLength > limit) {
+    if (!cur || forceNew || cur.chars + textLength > limit) {
       sessionState.seq = (sessionState.seq || 0) + 1
       cur = {
         id: "lanyuxi-msg2-" + String(sessionState.seq).padStart(3, "0"),
@@ -534,6 +542,7 @@ export function apply(ctx, rawConfig) {
       fresh = true
       newDay = true
       try { backupSessions("rollover") } catch {}
+      if (forceNew && cur.prevId) diag.rebuiltReason = "系统提示挂不上，强制换段重建"
     } else if (cur.lastDay !== day) {
       newDay = true
     }
@@ -546,6 +555,8 @@ export function apply(ctx, rawConfig) {
 
   /** 按上下文用量换段：第一次说话时创建，之后复用；到达阈值自动换新的一段。 */
   let systemSectionReady = false
+  /** 是否已经为「挂系统提示」强制换过一次段（只换一次，防抖） */
+  let rebuiltOnce = false
 
   // —— 守门员：出站内容比对「禁说清单」，命中就拒发 ——
   /** 主人称呼：一行多值，逗号/斜杠/顿号分隔，越靠前越优先。 */
