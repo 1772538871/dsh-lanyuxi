@@ -11,6 +11,7 @@ import { homedir } from "node:os"
 import { readdirSync, copyFileSync, appendFileSync } from "node:fs"
 import { randomUUID, createHash } from "node:crypto"
 import { spawn, spawnSync } from "node:child_process"
+import { createConnection } from "node:net"
 import { logEvent, messageSummary, readGrowth, saveMemory, savePersonalitySample, recall } from "./memory-log.js"
 
 export const name = "lanyuxi"
@@ -1722,10 +1723,45 @@ export function apply(ctx, rawConfig) {
   const qrPath = join(config.napcatDir, "napcat", "cache", "qrcode.png")
   let napcatStarting = false
 
-  function startNapcat() {
-    if (napcatStarting) return { ok: true, already: true }
+  /** 端口真连一下：命令执行成功 ≠ 服务真的起来了 */
+  function portOpen(port, host = "127.0.0.1", timeoutMs = 800) {
+    return new Promise((resolve) => {
+      const sock = createConnection({ port, host })
+      let done = false
+      const finish = (ok) => {
+        if (done) return
+        done = true
+        try { sock.destroy() } catch {}
+        resolve(ok)
+      }
+      sock.setTimeout(timeoutMs)
+      sock.once("connect", () => finish(true))
+      sock.once("timeout", () => finish(false))
+      sock.once("error", () => finish(false))
+    })
+  }
+
+  /** 等端口起来，最多等 totalMs */
+  async function waitPort(port, totalMs = 15000) {
+    const until = Date.now() + totalMs
+    while (Date.now() < until) {
+      if (await portOpen(port)) return true
+      await new Promise((r = setTimeout) => r(1200))
+    }
+    return false
+  }
+
+  function napcatPort() {
+    const endpoint = readNapcatEndpoint(config.napcatDir)
+    return endpoint ? endpoint.port : 3001
+  }
+
+  async function startNapcat() {
+    if (napcatStarting) return { ok: false, already: true, error: "上一次启动还在等结果，别连点" }
     const bat = join(config.napcatDir, "napcat.bat")
     if (!existsSync(bat)) return { ok: false, error: "找不到 " + bat }
+    const port = napcatPort()
+    if (await portOpen(port)) return { ok: true, already: true, port }
     napcatStarting = true
     try {
       const nodeExe = join(config.napcatDir, "node.exe")
@@ -1736,23 +1772,39 @@ export function apply(ctx, rawConfig) {
       const script = hidden
         ? "Start-Process -FilePath " + psQuote(nodeExe) + " -ArgumentList " + psQuote(entry) + " -WorkingDirectory " + psQuote(config.napcatDir) + " -WindowStyle Hidden"
         : "Start-Process -FilePath " + psQuote(bat) + " -WorkingDirectory " + psQuote(config.napcatDir) + " -WindowStyle Hidden"
-      spawnSync("powershell", ["-NoProfile", "-Command", script], { encoding: "utf8", timeout: 20000, windowsHide: true })
-      const child = { pid: undefined }
-      logger.info?.("[lanyuxi] 已启动 NapCat: " + bat)
-      return { ok: true, pid: child.pid }
+      const result = spawnSync("powershell", ["-NoProfile", "-Command", script], { encoding: "utf8", timeout: 20000, windowsHide: true })
+      // 以前这里不看结果就直接 ok:true，启动失败也报成功 —— 假报成功比报错更坑
+      if (result.error) {
+        const why = String(result.error?.message || result.error)
+        logger.warn?.("[lanyuxi] 启动 NapCat 失败：" + why)
+        return { ok: false, error: "启动命令没跑起来：" + why }
+      }
+      const errText = String(result.stderr || "").trim()
+      if (result.status !== 0) {
+        logger.warn?.("[lanyuxi] 启动 NapCat 失败，退出码 " + result.status + "：" + errText.slice(0, 200))
+        return { ok: false, error: "启动命令退出码 " + result.status + (errText ? "：" + errText.slice(0, 200) : "") }
+      }
+      if (await waitPort(port, 15000)) {
+        logger.info?.("[lanyuxi] NapCat 已就绪，端口 " + port)
+        return { ok: true, port }
+      }
+      logger.warn?.("[lanyuxi] NapCat 命令成功但端口 " + port + " 没起来")
+      return {
+        ok: false,
+        error: "启动命令执行成功，但 " + port + " 端口 15 秒内没起来。常见原因：QQ 已登录（要先退出 QQ 再启动 NapCat）、需要扫码、被安全软件拦下。日志：" + join(config.napcatDir, "napcat-run.log"),
+      }
     } catch (error) {
       logger.warn?.("[lanyuxi] 启动 NapCat 失败: " + String(error))
       return { ok: false, error: String(error) }
     } finally {
-      setTimeout(() => { napcatStarting = false }, 15000)
+      napcatStarting = false
     }
   }
 
-  function stopNapcat() {
+  async function stopNapcat() {
     try {
       const pattern = config.napcatDir.replace(/'/g, "''")
-      const endpoint = readNapcatEndpoint(config.napcatDir)
-      const port = endpoint ? endpoint.port : 3001
+      const port = napcatPort()
       const script = [
         "$pids = @()",
         "try { $pids += (Get-NetTCPConnection -LocalPort " + port + " -State Listen -ErrorAction SilentlyContinue).OwningProcess } catch {}",
@@ -1763,9 +1815,19 @@ export function apply(ctx, rawConfig) {
         "Write-Output ($pids -join ',')",
       ].join("; ")
       const result = spawnSync("powershell", ["-NoProfile", "-Command", script], { encoding: "utf8", timeout: 20000, windowsHide: true })
+      if (result.error) {
+        const why = String(result.error?.message || result.error)
+        logger.warn?.("[lanyuxi] 关闭 NapCat 失败：" + why)
+        return { ok: false, error: "关闭命令没跑起来：" + why }
+      }
       const killed = String(result.stdout ?? "").trim()
-      logger.info?.("[lanyuxi] 关闭 NapCat，命中 PID: " + (killed || "无"))
-      return { ok: true, killed: killed || "" }
+      // 发了停止命令不等于真停了：端口还在监听就照实说不成功
+      if (await waitPort(port, 8000)) {
+        logger.warn?.("[lanyuxi] 关闭 NapCat 后端口 " + port + " 仍在监听，命中 PID: " + (killed || "无"))
+        return { ok: false, killed, error: "发了停止命令，但 " + port + " 端口仍在监听（可能没权限，或进程名不匹配）" }
+      }
+      logger.info?.("[lanyuxi] NapCat 已关闭，命中 PID: " + (killed || "无"))
+      return { ok: true, killed }
     } catch (error) {
       logger.warn?.("[lanyuxi] 关闭 NapCat 失败: " + String(error))
       return { ok: false, error: String(error) }
@@ -1822,11 +1884,11 @@ export function apply(ctx, rawConfig) {
           return send(200, { connected, verified, verifyDetail, selfId, todaySent: quota.count, lastChat: lastChat?.chatKey ?? null, allowGroups: config.allowGroups, panel: config.napcatPanel })
         }
         if (url.pathname === "/lanyuxi/start") {
-          const result = startNapcat()
+          const result = await startNapcat()
           return send(result.ok ? 200 : 500, result)
         }
         if (url.pathname === "/lanyuxi/stop") {
-          const result = stopNapcat()
+          const result = await stopNapcat()
           return send(result.ok ? 200 : 500, result)
         }
         if (url.pathname === "/lanyuxi/selftest") {
