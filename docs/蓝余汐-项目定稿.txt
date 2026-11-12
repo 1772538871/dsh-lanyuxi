@@ -364,3 +364,16 @@ SQLite / PostgreSQL——换存储不动界面，接口形状不变。
   Python Worker          → 要视频理解 / PDF 批量解析 / 本地 Embedding
   知识图谱可视化          → 记忆过 5000 条、实体关系抽取跑通之后
   LoRA 微调              → 不作为基础设施依赖，等上述都稳定再评估
+
+（2026-11-12 追加：记忆 v0.5 —— 从"只记"变成"能读会用"）
+她多了两个自己的工具：
+  memory_save       把值得记的事写进 memories.jsonl：类型 episodic/person/knowledge/skill/self，
+                    可见性 private/shared/public，正文 200 字以内。
+  personality_record 每周写一次对自己的观察：五个 0~1 的维度（主动/好奇/幽默/黏人/嘴硬）
+                    + 一句"为什么"。
+每轮对话前自动检索：从 memories.jsonl 里按关键词捞**最多 5 条、总长不超过 300 字**；
+  群聊只捞 shared/public，只有私聊才用 private；检索失败就当没记住，绝不影响回话。
+每周第一次对话时，她会收到一次"这周你觉得自己有什么变化"的提示；门控状态记在
+  sessionState.lastPersonaSampleWeek（ISO 周，如 2026-W46），同一周只提示一次。
+id 必须跨重启唯一：写文件前先从该文件里**续号**（evt_/mem_/per_ 各自独立），
+  不许用进程内计数——否则同一天重启会写出重复 id，memories 的 sourceEvent 就会指错经历。
