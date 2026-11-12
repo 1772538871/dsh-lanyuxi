@@ -1379,6 +1379,52 @@ export function apply(ctx, rawConfig) {
     warmState.running = false
     saveVoiceWarm()
   }
+  // —— 合成任务：长任务走这里，前端轮询拿真实进度 ——
+  const synthJobs = new Map()
+  /** 强制合成（忽略 voiceRealtime 限制），供试听/任务使用。 */
+  async function synthesizeForced(text, lang) {
+    const chain = await engineChain()
+    if (!chain.length) throw new Error("没有可用的语音引擎")
+    const failures = []
+    for (const engine of chain) {
+      const out = cachePath(engine, text, lang)
+      if (existsSync(out) && statSync(out).size > 1000) return { file: out, engine, lang, cached: true }
+      try {
+        if (engine === "gpt-sovits") await synthGptSovits(text, out)
+        else if (engine === "edge-tts") synthEdgeTts(text, out)
+        else synthSapi(text, out)
+        if (!existsSync(out) || statSync(out).size < 1000) throw new Error(engine + " 产物为空")
+        return { file: out, engine, lang, cached: false }
+      } catch (error) {
+        failures.push(engine + ": " + String(error).slice(0, 120))
+        diag.voiceErrors = failures
+      }
+    }
+    throw new Error("所有语音引擎都失败 —— " + failures.join(" ｜ "))
+  }
+  function startSynthJob(text, lang) {
+    const id = randomUUID()
+    const job = { id, text, lang, state: "running", startedAt: Date.now(), finishedAt: 0, file: "", engine: "", error: "" }
+    synthJobs.set(id, job)
+    if (synthJobs.size > 20) {
+      for (const [k, v] of synthJobs) { if (v.state !== "running") { synthJobs.delete(k); break } }
+    }
+    void (async () => {
+      try {
+        const built = await synthesizeForced(text, lang)
+        job.file = built.file
+        job.engine = built.engine
+        job.state = "done"
+      } catch (error) {
+        job.error = String(error)
+        job.state = "error"
+      } finally {
+        job.finishedAt = Date.now()
+      }
+    })()
+    return job
+  }
+
   const warmPath = () => join(config.sessionCwd || process.cwd(), ".lanyuxi-voice-warm.json")
   function saveVoiceWarm() {
     try { writeFileSync(warmPath(), JSON.stringify(warmState, null, 2), "utf8") } catch {}
@@ -1625,6 +1671,34 @@ export function apply(ctx, rawConfig) {
           if (action === "start") { await startEngine(); return send(200, { ok: true, state: voiceState }) }
           const alive = await engineAlive()
           return send(200, { ok: true, alive, state: voiceState })
+        }
+        if (url.pathname === "/lanyuxi/voice/synth") {
+          if (req.method === "POST") {
+            let body = ""
+            req.on("data", (chunk) => { body += chunk })
+            req.on("end", () => {
+              try {
+                const payload = body ? JSON.parse(body) : {}
+                const text = String(payload.text || "").trim()
+                if (!text) return send(400, { ok: false, error: "没有要合成的文字" })
+                if (text.length > 40) return send(400, { ok: false, error: "太长，40 字以内" })
+                const job = startSynthJob(text, payload.lang || currentLang())
+                send(200, { ok: true, id: job.id, estimateSec: 150 })
+              } catch (error) {
+                send(500, { ok: false, error: String(error) })
+              }
+            })
+            return
+          }
+          const id = url.searchParams.get("id") || ""
+          const job = synthJobs.get(id)
+          if (!job) return send(404, { ok: false, error: "没有这个任务" })
+          const elapsed = Math.round(((job.finishedAt || Date.now()) - job.startedAt) / 1000)
+          return send(200, {
+            ok: true, id: job.id, state: job.state, elapsed,
+            percent: job.state === "done" ? 100 : Math.min(96, Math.round(elapsed / 150 * 100)),
+            file: job.file, engine: job.engine, lang: job.lang, text: job.text, error: job.error,
+          })
         }
         if (url.pathname === "/lanyuxi/voice/audio") {
           const name = url.searchParams.get("name") || ""

@@ -545,18 +545,32 @@ window.__ModuleLoader__.load({
             tick();
             const ticker = setInterval(tick, 1000);
             const stopTicker = function () { clearInterval(ticker); synthesizing = false; testBtn.textContent = '试听'; testBtn.disabled = false; const p = root.querySelector('#lyx-voice-progress'); if (p) p.remove(); };
-            fetch('/lanyuxi/voice/test' + (want ? ('?text=' + encodeURIComponent(want)) : '')).then(function (r) { return r.json(); }).then(function (x) {
-              stopTicker();
-              if (x && x.ok && x.pending) { lyxToast(x.hint || '正在合成，稍后再点一次'); return; }
-              if (x && x.ok) {
-                const name = x.file.split(/[\\/]/).pop();
-                playVoice(name, x.text);
-                const langName = { zh: '中文', ja: '日语', en: '英语' }[x.lang] || '中文';
-                lyxToast('用 ' + x.engine + ' · ' + langName + ' 合成：' + (x.text || name));
-              } else {
-                lyxToast('失败：' + ((x && x.error) || '未知'));
-              }
-            }).catch(function () { stopTicker(); lyxToast('接口不可用或超时（现场合成可能要 2 分钟）'); });
+            fetch('/lanyuxi/voice/synth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: want || '早啊，起床了没。' }) })
+              .then(function (r) { return r.json(); })
+              .then(function (job) {
+                if (!job || !job.ok) { stopTicker(); lyxToast('起步失败：' + ((job && job.error) || '未知')); return; }
+                const poll = setInterval(function () {
+                  fetch('/lanyuxi/voice/synth?id=' + encodeURIComponent(job.id)).then(function (r) { return r.json(); }).then(function (s) {
+                    if (!s || !s.ok) { clearInterval(poll); stopTicker(); lyxToast('查询失败'); return; }
+                    const progEl = root.querySelector('#lyx-voice-progress');
+                    if (progEl && s.state === 'running') {
+                      progEl.innerHTML = '<span class="lyx-spin"></span><span>正在合成语音…已用 ' + s.elapsed + ' 秒</span>' +
+                        '<span style="margin-left:auto;color:#8ea6c9">' + s.percent + '%</span>';
+                    }
+                    if (s.state === 'done') {
+                      clearInterval(poll); stopTicker();
+                      const name = s.file.split(/[\\/]/).pop();
+                      playVoice(name, s.text);
+                      const langName = { zh: '中文', ja: '日语', en: '英语' }[s.lang] || '中文';
+                      lyxToast('用 ' + s.engine + ' · ' + langName + ' 合成：' + s.text);
+                    } else if (s.state === 'error') {
+                      clearInterval(poll); stopTicker();
+                      lyxToast('失败：' + s.error);
+                    }
+                  }).catch(function () { clearInterval(poll); stopTicker(); });
+                }, 2000);
+              })
+              .catch(function () { stopTicker(); lyxToast('接口不可用'); });
           };
         }
         function load() {
