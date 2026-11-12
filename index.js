@@ -11,7 +11,7 @@ import { homedir } from "node:os"
 import { readdirSync, copyFileSync, appendFileSync } from "node:fs"
 import { randomUUID, createHash } from "node:crypto"
 import { spawn, spawnSync } from "node:child_process"
-import { logEvent, messageSummary, readGrowth } from "./memory-log.js"
+import { logEvent, messageSummary, readGrowth, saveMemory, savePersonalitySample, recall } from "./memory-log.js"
 
 export const name = "lanyuxi"
 export const inject = ["tools"]
@@ -167,6 +167,25 @@ export function apply(ctx, rawConfig) {
     return messageType === "group" ? `group:${groupId}` : `private:${userId}`
   }
 
+  /** 检索到的记忆拼成一段提示：最多 5 条、总长 300 字以内，塞不下的整条丢掉（不砍半条） */
+  function recallBlock(hits) {
+    const head = "（你记得这些事，可以用，但没被问就别硬提："
+    const items = []
+    let used = head.length + 2
+    for (const hit of Array.isArray(hits) ? hits : []) {
+      if (items.length >= 5) break
+      const content = String(hit?.content ?? "").replace(/\s+/g, " ").trim()
+      if (!content) continue
+      const at = String(hit?.at ?? "")
+      const day = at.length >= 10 ? at.slice(5, 10).replace("-", "月") + "日" : ""
+      const line = "- " + content + "（" + String(hit?.type ?? "") + (day ? "·" + day : "") + "）"
+      if (used + line.length + 1 > 300) continue
+      used += line.length + 1
+      items.push(line)
+    }
+    return items.length ? head + "\n" + items.join("\n") + "\n）" : ""
+  }
+
   async function handleEvent(event) {
     if (event.post_type !== "message") return
     if (event.user_id !== undefined && String(event.user_id) === selfId) { diag.droppedSelf += 1; return }
@@ -316,6 +335,18 @@ export function apply(ctx, rawConfig) {
         }
       }
     }
+    // —— 每周一次：本周第一次说话时，让她记一份对自己的观察（状态跟着 sessionState 走，不另开文件） ——
+    let personaTask = ""
+    const weekKey = isoWeekKey()
+    if (sessionState.lastPersonaSampleWeek !== weekKey) {
+      sessionState.lastPersonaSampleWeek = weekKey
+      saveSessionState()
+      personaTask = [
+        `【这周要记的一件事】用 personality_record 记一份你对自己的观察（${weekKey}）：五个维度各给 0 到 1 的一个数——initiative 主动、curiosity 好奇、humor 幽默、clinging 黏人、tsundere 嘴硬。`,
+        "别为了填而填：没变化的那几维就别写，写一两个也够；why 一句话说清这周哪件事让你这么打分。",
+        "记完再回这条消息，这件事不用跟他说。",
+      ].join("\n")
+    }
     const seg = segmentInfo(text.length)
     const prevId = (sessionState.current && sessionState.current.prevId) || ""
     lastActivityAt = Date.now()
@@ -335,12 +366,26 @@ export function apply(ctx, rawConfig) {
     const lines = [
       timeLine + `【QQ · ${messageType === "group" ? ("群聊" + (gname ? "「" + gname + "」" : "") ) : "私聊"}】${who} 说：${text}`,
     ]
+    // 记忆 v0.5：把跟她有关的旧记忆捞几条带进提示。群聊只捞 shared/public，检索失败就当没记住
+    try {
+      const hits = recall(config.homeDir || "E:\\dsh-foundry\\lanyuxi-home", {
+        text,
+        platform: messageType === "group" ? "group" : "private",
+        limit: 5,
+      })
+      const memo = recallBlock(hits)
+      if (memo) lines.push(memo)
+    } catch (error) {
+      diag.memoryError = String(error)
+      logger.warn?.("[lanyuxi] 记忆检索没跑通: " + String(error))
+    }
     if (gctx) lines.push(`（群里刚刚在聊：\n${gctx}\n 你只接被叫到的那句，别把别人的私事往外说。）`)
     if (wonder.lastSentAt && !wonder.repliedAt) {
       const mins = Math.round((Date.now() - wonder.lastSentAt) / 60000)
       if (mins >= 30) lines.push(`（你上次跟他说话是 ${mins} 分钟前，他到现在没回。怎么想随你，不用勉强自己找理由。）`)
     }
     if (diaryTask) lines.push(diaryTask)
+    if (personaTask) lines.push(personaTask)
     if (!systemSectionReady) {
       const persona = personaText()
       if (persona) lines.push(persona.slice(0, 6000))
@@ -378,6 +423,13 @@ export function apply(ctx, rawConfig) {
   const DAY_MS = 86400000
   const ymd = (d) => "" + d.getFullYear() + z2(d.getMonth() + 1) + z2(d.getDate())
   const md = (d) => z2(d.getMonth() + 1) + "-" + z2(d.getDate())
+  /** ISO 周，形如 2026-W46：先挪到本周的周四，再数它是今年的第几周 */
+  function isoWeekKey(d = new Date()) {
+    const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()))
+    t.setUTCDate(t.getUTCDate() + 4 - (t.getUTCDay() || 7))
+    const yearStart = new Date(Date.UTC(t.getUTCFullYear(), 0, 1))
+    return t.getUTCFullYear() + "-W" + z2(Math.ceil(((t - yearStart) / DAY_MS + 1) / 7))
+  }
 
   /** 每 3 天一个会话：以当年 1 月 1 日为锚点固定分桶，跨年也会重新对齐。 */
   function bucketStart(d = new Date()) {
@@ -416,6 +468,7 @@ export function apply(ctx, rawConfig) {
   if (!sessionState || typeof sessionState !== "object") sessionState = {}
   if (typeof sessionState.seq !== "number") sessionState.seq = 0
   if (typeof sessionState.lastDiaryDay !== "string") sessionState.lastDiaryDay = ""
+  if (typeof sessionState.lastPersonaSampleWeek !== "string") sessionState.lastPersonaSampleWeek = ""
   function saveSessionState() {
     try {
       mkdirSync(config.sessionCwd || process.cwd(), { recursive: true })
@@ -1206,6 +1259,89 @@ export function apply(ctx, rawConfig) {
       copyFileSync(src, dest)
       diag.stickersSaved = (diag.stickersSaved || 0) + 1
       return "已收藏到 " + dest + "。想用就调用 qq_send 并把 image 填成这个路径。"
+    },
+  })
+
+  // —— 她能用的工具：把值得记的事写进记忆本 ——
+  const MEMORY_TYPE_CN = { episodic: "这件事", person: "关于人", knowledge: "知识", skill: "会的", self: "我自己" }
+  const VISIBILITY_CN = { private: "只你自己知道", shared: "群里可以说", public: "谁都能知道" }
+  ctx.tools.register({
+    name: "memory_save",
+    description: "把一件值得记住的事写进你的记忆本，一条只说一件事，content 200 字以内。type 挑：episodic（发生了什么）/ person（关于那个人）/ knowledge（学到的东西）/ skill（会了什么）/ self（关于你自己）。visibility 决定这条能不能在群里说：private 只你自己知道、shared 群里可以说、public 谁都能知道。",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        content: { type: "string", description: "这条记忆本身，200 字内，一句话说清一件事。" },
+        type: { type: "string", enum: ["episodic", "person", "knowledge", "skill", "self"], description: "这条记忆属于哪一类，默认 episodic。" },
+        visibility: { type: "string", enum: ["private", "shared", "public"], description: "能不能在群里说，默认 private。" },
+      },
+      required: ["content"],
+    },
+    output: {
+      schema: { type: "string" },
+      render: (_args, value) => [{ type: "text", text: value }],
+    },
+    async execute(args) {
+      const content = String(args?.content ?? "").trim()
+      const type = String(args?.type ?? "").trim() || "episodic"
+      const visibility = String(args?.visibility ?? "").trim() || "private"
+      if (!content) throw new Error("content 不能为空")
+      if (!MEMORY_TYPE_CN[type]) throw new Error("type 只能是 episodic/person/knowledge/skill/self")
+      if (!VISIBILITY_CN[visibility]) throw new Error("visibility 只能是 private/shared/public")
+      // 写不进去只回一句话，不许把她的回合炸掉
+      try {
+        const row = saveMemory(config.homeDir || "E:\\dsh-foundry\\lanyuxi-home", { content, type, visibility })
+        diag.memoriesSaved = (diag.memoriesSaved || 0) + 1
+        return "记住了（" + MEMORY_TYPE_CN[type] + "·" + VISIBILITY_CN[visibility] + "）：" + row.content
+      } catch (error) {
+        diag.memoryError = String(error)
+        logger.warn?.("[lanyuxi] 记忆写不进去: " + String(error))
+        return "这条记忆没写进去（" + String(error) + "）。别停在这件事上，照常聊。"
+      }
+    },
+  })
+
+  // —— 她能用的工具：每周记一份对自己的观察 ——
+  ctx.tools.register({
+    name: "personality_record",
+    description: "把你这周对自己的观察记一笔：五个维度各给一个 0 到 1 的数——initiative 主动、curiosity 好奇、humor 幽默、clinging 黏人、tsundere 嘴硬。没变化的维度可以不写，但至少要给一个；why 用一句话说清这周哪件事让你这么打分（120 字内）。",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        initiative: { type: "number", description: "主动：0 到 1。" },
+        curiosity: { type: "number", description: "好奇：0 到 1。" },
+        humor: { type: "number", description: "幽默：0 到 1。" },
+        clinging: { type: "number", description: "黏人：0 到 1。" },
+        tsundere: { type: "number", description: "嘴硬：0 到 1。" },
+        why: { type: "string", description: "为什么给这些数，一句话，120 字内。" },
+      },
+      required: [],
+    },
+    output: {
+      schema: { type: "string" },
+      render: (_args, value) => [{ type: "text", text: value }],
+    },
+    async execute(args) {
+      const traits = {}
+      for (const key of ["initiative", "curiosity", "humor", "clinging", "tsundere"]) {
+        const raw = args ? args[key] : undefined
+        if (raw === undefined || raw === null || raw === "") continue
+        const value = Number(raw)
+        if (!Number.isFinite(value) || value < 0 || value > 1) throw new Error(key + " 要给 0 到 1 之间的数")
+        traits[key] = value
+      }
+      if (!Object.keys(traits).length) throw new Error("五个维度至少给一个")
+      try {
+        const row = savePersonalitySample(config.homeDir || "E:\\dsh-foundry\\lanyuxi-home", { traits, why: args?.why })
+        diag.personalitySamples = (diag.personalitySamples || 0) + 1
+        return "记下这周的观察了（" + Object.keys(row.traits).join("、") + "）" + (row.why ? "：" + row.why : "")
+      } catch (error) {
+        diag.memoryError = String(error)
+        logger.warn?.("[lanyuxi] 人格采样写不进去: " + String(error))
+        return "这份观察没记下来（" + String(error) + "）。不用重试，照常过你的。"
+      }
     },
   })
 
