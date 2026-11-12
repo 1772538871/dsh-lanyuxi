@@ -5,7 +5,7 @@
  * 配置里读，不再让主人填一遍。她在 DSH 里只有一个会话，所有聊天都汇进这一个大脑。
  */
 
-import { readFileSync, existsSync, mkdirSync, writeFileSync, statSync, unlinkSync, rmdirSync, rmSync } from "node:fs"
+import { readFileSync, existsSync, mkdirSync, writeFileSync, statSync, unlinkSync, rmdirSync, rmSync, renameSync } from "node:fs"
 import { join, basename, dirname, relative } from "node:path"
 import { homedir } from "node:os"
 import { readdirSync, copyFileSync, appendFileSync } from "node:fs"
@@ -411,6 +411,7 @@ export function apply(ctx, rawConfig) {
           "[回话规矩]\n" + qqRuleText(),
           "[上一段]\n" + prevRuleText(),
           "[日记与存档]\n" + diaryRuleText(),
+          "[看图与收藏]\n" + stickerRuleText(),
         ].join("\n")
         lines.push(echo)
       } catch (error) {
@@ -770,6 +771,17 @@ export function apply(ctx, rawConfig) {
     return [head + "那段里你经历过这些（是摘要，不是原文）：", ...sum.map((x) => "- " + x), "要更细的内容，用会话检索查 " + cur.prevId + "，别凭印象编。"].join("\n")
   }
 
+  /** 系统提示里「看图与收藏的规矩」那一段（提示与调试回显共用） */
+  function stickerRuleText() {
+    return [
+      "【看图与收藏的规矩】",
+      "收到图片或表情时，消息里会给你本地路径：先用 read_image 看懂它在表达什么，再决定理不理它。禁止凭文件名猜内容。",
+      "想收藏就调用 sticker_save：mood 按你理解到的情绪归到 happy/speechless/coy/fierce，name 写成「情绪-它表达的意思」（例：开心-猫猫点头）。",
+      "主人说「这张归错了」「这不叫撒娇」时，用 sticker_move 把那一张挪到对的那档、顺便改名。只动这一张，不要批量挪别的。",
+      "图里有主人（截图、聊天记录、带名字的）：先用 image_mark 标成禁外发，再考虑要不要发。",
+    ].join("\n")
+  }
+
   /** 把「在 QQ 上怎么回话」挂成系统提示段，不塞进用户消息里。 */
   function setupAgentPrompt(agentCtx) {
     try {
@@ -802,6 +814,7 @@ export function apply(ctx, rawConfig) {
       sp.section({ name: "lanyuxi-qq", order: 900, text: qqRuleText })
       sp.section({ name: "lanyuxi-prev", order: 220, text: prevRuleText })
       sp.section({ name: "lanyuxi-diary", order: 950, text: diaryRuleText })
+      sp.section({ name: "lanyuxi-stickers", order: 960, text: stickerRuleText })
       systemSectionReady = true
       markSystemSection("ok")
     } catch (error) {
@@ -1485,6 +1498,50 @@ export function apply(ctx, rawConfig) {
       copyFileSync(src, dest)
       diag.stickersSaved = (diag.stickersSaved || 0) + 1
       return "已收藏到 " + dest + "。想用就调用 qq_send 并把 image 填成这个路径。"
+    },
+  })
+
+  // —— 她能用的工具：把归错类的那一张挪对（纠正只动这一张，不复制、不重建） ——
+  const STICKER_MOODS = ["happy", "speechless", "coy", "fierce"]
+  ctx.tools.register({
+    name: "sticker_move",
+    description:
+      "把表情包里归错类的那一张挪到对的情绪档，顺便可以改名。只动这一张：不复制、不新建、不影响同档其它图。from/to 只能是 happy（开心）/ speechless（无语）/ coy（撒娇）/ fierce（凶）。",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        from: { type: "string", enum: STICKER_MOODS, description: "它现在在哪一档" },
+        name: { type: "string", description: "它现在的文件名（含扩展名，比如 开心-猫猫点头.gif）" },
+        to: { type: "string", enum: STICKER_MOODS, description: "应该挪到哪一档" },
+        rename: { type: "string", description: "顺便改个名字（不带扩展名）；不改就省略" },
+      },
+      required: ["from", "name", "to"],
+    },
+    output: { schema: { type: "string" }, render: (_args, value) => [{ type: "text", text: value }] },
+    async execute(args) {
+      const from = String(args?.from || "").trim()
+      const to = String(args?.to || "").trim()
+      const name = String(args?.name || "").trim()
+      if (!STICKER_MOODS.includes(from) || !STICKER_MOODS.includes(to)) throw new Error("from / to 只能是 happy/speechless/coy/fierce")
+      if (!name || /[\\/]/.test(name)) throw new Error("name 只要文件名，不要带目录")
+      const home = config.homeDir || "E:\\dsh-foundry\\lanyuxi-home"
+      const src = join(home, "stickers", from, name)
+      if (!existsSync(src)) throw new Error("在 " + from + " 里找不到这张：" + name)
+      const ext = (name.match(/\.[a-z0-9]+$/i) || [""])[0]
+      const base = ext ? name.slice(0, -ext.length) : name
+      const wanted = String(args?.rename || "").trim()
+      const safe = (wanted || base).replace(/[\\/:*?"<>|]/g, "").slice(0, 20) || base
+      const dir = join(home, "stickers", to)
+      mkdirSync(dir, { recursive: true })
+      const dest = join(dir, safe + ext)
+      if (dest.toLowerCase() === src.toLowerCase()) return "它已经在 " + to + " 了：" + src
+      if (existsSync(dest)) throw new Error("那边已经有一张同名的（" + safe + ext + "），换个名字再挪：给它一个 rename")
+      if (from === to && safe === base) return "档没变，名字也没变，不用挪：" + src
+      renameSync(src, dest)
+      diag.stickersMoved = (diag.stickersMoved || 0) + 1
+      try { logEvent(home, { kind: "action", platform: "local", who: "她", perms: "system", summary: "把表情从 " + from + " 挪到 " + to + "：" + safe + ext }) } catch {}
+      return "挪好了：" + src + " → " + dest
     },
   })
 
