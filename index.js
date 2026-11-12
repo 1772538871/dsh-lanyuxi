@@ -120,7 +120,7 @@ export function apply(ctx, rawConfig) {
   let selfNickname = ""
   let connected = false
   let verified = false
-  const diag = { events: 0, messages: 0, droppedSelf: 0, droppedGroup: 0, droppedPrivate: 0, droppedEmpty: 0, duplicates: 0, delivered: 0, deliverErrors: 0, lastError: "", memoryError: "", recent: [] }
+  const diag = { events: 0, messages: 0, droppedSelf: 0, droppedGroup: 0, droppedPrivate: 0, droppedEmpty: 0, duplicates: 0, delivered: 0, deliverErrors: 0, lastError: "", memoryError: "", systemSection: "", systemSectionAt: 0, recent: [] }
   let verifyDetail = ""
   let pending = new Map()
   let echoSeq = 1
@@ -639,12 +639,18 @@ export function apply(ctx, rawConfig) {
     return parts.join("\n\n")
   }
 
+  /** 系统提示段的挂载状态：既写值也写时间，面板上一眼能看出「什么时候试过、结果是什么」 */
+  function markSystemSection(value) {
+    diag.systemSection = String(value)
+    diag.systemSectionAt = Date.now()
+  }
+
   /** 把「在 QQ 上怎么回话」挂成系统提示段，不塞进用户消息里。 */
   function setupAgentPrompt(agentCtx) {
     try {
       const sp = agentCtx && (typeof agentCtx.get === "function" ? agentCtx.get("systemPrompt") : agentCtx.systemPrompt)
       if (!sp || typeof sp.section !== "function") {
-        diag.systemSection = "no-api:" + (agentCtx ? typeof agentCtx.get : "no-context")
+        markSystemSection("no-api:" + (agentCtx ? typeof agentCtx.get : "no-context"))
         return
       }
       sp.section({
@@ -708,10 +714,10 @@ export function apply(ctx, rawConfig) {
         },
       })
       systemSectionReady = true
-      diag.systemSection = "ok"
+      markSystemSection("ok")
     } catch (error) {
       systemSectionReady = false
-      diag.systemSection = "failed: " + String(error)
+      markSystemSection("failed: " + String(error))
     }
   }
 
@@ -726,9 +732,9 @@ export function apply(ctx, rawConfig) {
       if (!systemSectionReady) {
         try {
           setupAgentPrompt(agent)
-          if (!systemSectionReady) diag.systemSection = "no-api:已有 agent 上没有 systemPrompt 接口"
+          if (!systemSectionReady) markSystemSection("no-api:已有 agent 上没有 systemPrompt 接口")
         } catch (error) {
-          diag.systemSection = "failed: " + String(error)
+          markSystemSection("failed: " + String(error))
         }
       }
       return agent
@@ -2493,6 +2499,23 @@ export function apply(ctx, rawConfig) {
     }, 5000)
     return () => clearTimeout(timer)
   }, "lanyuxi: 语音引擎自启")
+
+  // 重载后不必等 QQ 消息：每 5 秒试一次把系统提示挂到当前会话上，挂上就停
+  ctx.effect(() => {
+    let tries = 0
+    const timer = setInterval(() => {
+      if (systemSectionReady || tries >= 12) { clearInterval(timer); return }
+      tries += 1
+      const agents = ctx.get("agents")
+      const key = sessionState.current ? sessionState.current.id : ""
+      if (!agents || !key) return
+      let agent
+      try { agent = agents.get(key) } catch { return }
+      if (!agent) return
+      try { setupAgentPrompt(agent) } catch (error) { markSystemSection("failed: " + String(error)) }
+    }, 5000)
+    return () => clearInterval(timer)
+  }, "lanyuxi: 系统提示挂载")
 
   ctx.effect(() => {
     const queueTimer = setInterval(drainOutbox, 2000)
