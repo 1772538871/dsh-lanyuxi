@@ -401,6 +401,22 @@ export function apply(ctx, rawConfig) {
         `当前会话 ${seg.id} 第 ${seg.segment} 段；上一段是 ${prevId || "（无）"}。现在 ${stampNow()}。`
       )
     }
+    // 调试开关：把这一轮的系统提示抄一份附在用户消息里（系统提示本身不是消息，永远不出现在会话里）
+    if (settings.echoSystemPrompt) {
+      try {
+        const echo = [
+          "———— 以下是这一轮的系统提示（调试回显，关了就没有）————",
+          "[人格] " + (personaText() || "（用内置最小人格）").slice(0, 600),
+          "[称呼] " + ownerAliases().join("、"),
+          "[回话规矩]\n" + qqRuleText(),
+          "[上一段]\n" + prevRuleText(),
+          "[日记与存档]\n" + diaryRuleText(),
+        ].join("\n")
+        lines.push(echo)
+      } catch (error) {
+        diag.echoError = String(error)
+      }
+    }
     const prompt = lines.join("\n")
 
     await titleForSegment(seg, text)
@@ -492,6 +508,9 @@ export function apply(ctx, rawConfig) {
     voiceEngine: config.voiceEngine || "gpt-sovits",
     voiceLang: config.gptSovitsTextLang || "zh",
     gptSovitsDir: config.gptSovitsDir || "E:\\GPT-SoVITS",
+    // 调试开关：把她这一轮拿到的系统提示抄一份附在用户消息里，方便在会话里确认她看到了什么。
+    // 系统提示本身不是消息、永远不会出现在会话里，所以"显示"只能靠回显。
+    echoSystemPrompt: false,
   }
   try {
     if (existsSync(settingsPath())) {
@@ -502,6 +521,7 @@ export function apply(ctx, rawConfig) {
       if (loaded && typeof loaded.voiceEngine === "string") settings.voiceEngine = loaded.voiceEngine
       if (loaded && ["zh", "ja", "en", "auto"].indexOf(loaded.voiceLang) >= 0) settings.voiceLang = loaded.voiceLang
       if (loaded && typeof loaded.gptSovitsDir === "string" && loaded.gptSovitsDir) settings.gptSovitsDir = loaded.gptSovitsDir
+      if (loaded && typeof loaded.echoSystemPrompt === "boolean") settings.echoSystemPrompt = loaded.echoSystemPrompt
     }
   } catch {}
   function saveSettings() {
@@ -705,6 +725,51 @@ export function apply(ctx, rawConfig) {
     diag.systemSectionAt = Date.now()
   }
 
+  /** 系统提示里「怎么在 QQ 上回话」那一段（提示与调试回显共用） */
+  function qqRuleText() {
+    const cur = sessionState.current
+    const id = cur ? cur.id : "（未建立）"
+    const prev = cur && cur.prevId ? cur.prevId : ""
+    const lines = [
+      `你正在 QQ 上和${ownerLabel()}聊天（你的小号 ${selfId || "?"}，${ownerLabel()} ${config.ownerQq || "?"}）。`,
+      "每收到一条消息，必须调用 qq_send 工具回一句话；只在会话里回答、不调用工具，主人是收不到的。",
+      "qq_send 不填 target 就回给当前这个聊天。",
+    ]
+    if (cur) lines.push(`当前会话 ${id}（第 ${sessionState.seq || 1} 段）。`)
+    if (prev) lines.push(`上一段会话的 id 是 ${prev}；主人提到以前的事，先用会话检索去查那个 id 再回答。`)
+    else lines.push("这是第一段会话，没有更早的记录。")
+    lines.push(`现在时间：${stampNow()}`)
+    return lines.join("\n")
+  }
+
+  /** 系统提示里「日记与存档的规矩」那一段（提示与调试回显共用） */
+  function diaryRuleText() {
+    const now = new Date()
+    const week = "日一二三四五六"[now.getDay()]
+    const head = now.getFullYear() + "年" + (now.getMonth() + 1) + "月" + now.getDate() + "日 星期" + week +
+      " 天气（写 晴/多云/小雨，后面跟 有点热/凉快/冷，不用冒号） 心情（随手一个词，如 一般 / 开心 / 烦）"
+    return [
+      "【日记与存档的规矩】",
+      "看到「【今天的第一件事】」：先用 diary_write 把今天两篇日记写完，再回那条 QQ 消息。",
+      "写日记只用 diary_write 工具，一次给两篇：to_owner 是给主人看的表日记（小学生口吻，200 字以内），private 是只给自己看的里日记（可以嘴硬、可以承认在意）。",
+      "两篇的第一行都照这个样式写，整行不出现冒号：",
+      head,
+      "第二行空一行，然后自由写正文（不一定要「今天」开头），写昨天跟他说了什么、他哪句话惹你笑了或气到你了。日记正文不要贴回 QQ。",
+      "落盘由插件负责：你不需要、也不要用文件工具写任何文件。记忆用 memory_save，表情用 sticker_save，日记用 diary_write。",
+      "看到「【这周记一笔】」：用 personality_record 记一次对自己的观察——五个 0~1 的维度只写有变化的，why 一句话说明。别为了填而填，这件事也不用跟他说。",
+    ].join("\n")
+  }
+
+  /** 系统提示里「上一段摘要」那一段（提示与调试回显共用） */
+  function prevRuleText() {
+    const cur = sessionState.current
+    if (!cur || !cur.prevId) return "这是你的第一段会话，没有更早的记录。"
+    const head = "上一段会话是 " + cur.prevId + "。"
+    const sum = Array.isArray(cur.prevSummary) ? cur.prevSummary.filter(Boolean) : []
+    if (!sum.length) return head + "你手上没有它的摘要；主人提到以前的事，先用会话检索查那个 id 再回答。"
+    return [head + "那段里你经历过这些（是摘要，不是原文）：", ...sum.map((x) => "- " + x), "要更细的内容，用会话检索查 " + cur.prevId + "，别凭印象编。"].join("\n")
+  }
+
   /** 把「在 QQ 上怎么回话」挂成系统提示段，不塞进用户消息里。 */
   function setupAgentPrompt(agentCtx) {
     try {
@@ -734,57 +799,9 @@ export function apply(ctx, rawConfig) {
           ].join("\n")
         },
       })
-      sp.section({
-        name: "lanyuxi-qq",
-        order: 900,
-        text: function () {
-          const cur = sessionState.current
-          const id = cur ? cur.id : "（未建立）"
-          const prev = cur && cur.prevId ? cur.prevId : ""
-          const lines = [
-            `你正在 QQ 上和${ownerLabel()}聊天（你的小号 ${selfId || "?"}，${ownerLabel()} ${config.ownerQq || "?"}）。`,
-            "每收到一条消息，必须调用 qq_send 工具回一句话；只在会话里回答、不调用工具，主人是收不到的。",
-            "qq_send 不填 target 就回给当前这个聊天。",
-          ]
-          if (cur) lines.push(`当前会话 ${id}（第 ${sessionState.seq || 1} 段）。`)
-          if (prev) lines.push(`上一段会话的 id 是 ${prev}；主人提到以前的事，先用会话检索去查那个 id 再回答。`)
-          else lines.push("这是第一段会话，没有更早的记录。")
-          lines.push(`现在时间：${stampNow()}`)
-          return lines.join("\n")
-        },
-      })
-      sp.section({
-        name: "lanyuxi-prev",
-        order: 220,
-        text: function () {
-          const cur = sessionState.current
-          if (!cur || !cur.prevId) return "这是你的第一段会话，没有更早的记录。"
-          const head = "上一段会话是 " + cur.prevId + "。"
-          const sum = Array.isArray(cur.prevSummary) ? cur.prevSummary.filter(Boolean) : []
-          if (!sum.length) return head + "你手上没有它的摘要；主人提到以前的事，先用会话检索查那个 id 再回答。"
-          return [head + "那段里你经历过这些（是摘要，不是原文）：", ...sum.map((x) => "- " + x), "要更细的内容，用会话检索查 " + cur.prevId + "，别凭印象编。"].join("\n")
-        },
-      })
-      sp.section({
-        name: "lanyuxi-diary",
-        order: 950,
-        text: function () {
-          const now = new Date()
-          const week = "日一二三四五六"[now.getDay()]
-          const head = now.getFullYear() + "年" + (now.getMonth() + 1) + "月" + now.getDate() + "日 星期" + week +
-            " 天气（写 晴/多云/小雨，后面跟 有点热/凉快/冷，不用冒号） 心情（随手一个词，如 一般 / 开心 / 烦）"
-          return [
-            "【日记与存档的规矩】",
-            "看到「【今天的第一件事】」：先用 diary_write 把今天两篇日记写完，再回那条 QQ 消息。",
-            "写日记只用 diary_write 工具，一次给两篇：to_owner 是给主人看的表日记（小学生口吻，200 字以内），private 是只给自己看的里日记（可以嘴硬、可以承认在意）。",
-            "两篇的第一行都照这个样式写，整行不出现冒号：",
-            head,
-            "第二行空一行，然后自由写正文（不一定要「今天」开头），写昨天跟他说了什么、他哪句话惹你笑了或气到你了。日记正文不要贴回 QQ。",
-            "落盘由插件负责：你不需要、也不要用文件工具写任何文件。记忆用 memory_save，表情用 sticker_save，日记用 diary_write。",
-            "看到「【这周记一笔】」：用 personality_record 记一次对自己的观察——五个 0~1 的维度只写有变化的，why 一句话说明。别为了填而填，这件事也不用跟他说。",
-          ].join("\n")
-        },
-      })
+      sp.section({ name: "lanyuxi-qq", order: 900, text: qqRuleText })
+      sp.section({ name: "lanyuxi-prev", order: 220, text: prevRuleText })
+      sp.section({ name: "lanyuxi-diary", order: 950, text: diaryRuleText })
       systemSectionReady = true
       markSystemSection("ok")
     } catch (error) {
@@ -2478,12 +2495,19 @@ export function apply(ctx, rawConfig) {
               settings.backupHours = Math.round(h)
               saveSettings()
             }
+            const echo = url.searchParams.get("echoSystemPrompt")
+            if (echo === "1" || echo === "0") {
+              settings.echoSystemPrompt = echo === "1"
+              saveSettings()
+              logger.info?.("[lanyuxi] 系统提示回显：" + (settings.echoSystemPrompt ? "开" : "关"))
+            }
           }
           const cur = sessionState.current
           return send(200, {
             rolloverPercent: settings.rolloverPercent,
             backupHours: settings.backupHours,
             backupEnabled: settings.backupEnabled,
+            echoSystemPrompt: Boolean(settings.echoSystemPrompt),
             contextWindowTokens: config.contextWindowTokens || 1048576,
             limitChars: currentLimit(),
             usedChars: cur ? cur.chars : 0,
