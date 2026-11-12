@@ -5,12 +5,13 @@
  * 配置里读，不再让主人填一遍。她在 DSH 里只有一个会话，所有聊天都汇进这一个大脑。
  */
 
-import { readFileSync, existsSync, mkdirSync, writeFileSync, statSync, unlinkSync, rmdirSync } from "node:fs"
+import { readFileSync, existsSync, mkdirSync, writeFileSync, statSync, unlinkSync, rmdirSync, rmSync } from "node:fs"
 import { join, basename, dirname } from "node:path"
 import { homedir } from "node:os"
 import { readdirSync, copyFileSync, appendFileSync } from "node:fs"
 import { randomUUID, createHash } from "node:crypto"
 import { spawn, spawnSync } from "node:child_process"
+import { logEvent, messageSummary, readGrowth } from "./memory-log.js"
 
 export const name = "lanyuxi"
 export const inject = ["tools"]
@@ -118,11 +119,13 @@ export function apply(ctx, rawConfig) {
   let selfNickname = ""
   let connected = false
   let verified = false
-  const diag = { events: 0, messages: 0, droppedSelf: 0, droppedGroup: 0, droppedPrivate: 0, droppedEmpty: 0, duplicates: 0, delivered: 0, deliverErrors: 0, lastError: "", recent: [] }
+  const diag = { events: 0, messages: 0, droppedSelf: 0, droppedGroup: 0, droppedPrivate: 0, droppedEmpty: 0, duplicates: 0, delivered: 0, deliverErrors: 0, lastError: "", memoryError: "", recent: [] }
   let verifyDetail = ""
   let pending = new Map()
   let echoSeq = 1
   let lastChat
+  /** 还在等她回话的聊天（每次投递进一条，成功回复后清掉）——用来替掉 lastChat 的隐式寻址。 */
+  const pendingChats = []
   let sessionId
 
   const statePath = join(config.sessionCwd || process.cwd(), ".lanyuxi-qq.json")
@@ -192,18 +195,22 @@ export function apply(ctx, rawConfig) {
 
     if (messageType === "group") {
       if (!config.allowGroups.includes(groupId)) { diag.droppedGroup += 1; return }
-      const speaker = event.sender?.card || event.sender?.nickname || String(userId)
-      if (text) pushGroupMessage(groupId, speaker, text)
-      rememberGroupName(groupId)
-      const free = config.freeGroups.includes(groupId)
-      if (!free && !atMe) { diag.droppedGroup += 1; return }
     } else if (messageType === "private") {
       if (config.ownerQq && userId !== config.ownerQq) { diag.droppedPrivate += 1; return }
     } else {
       return
     }
 
+    // 去重必须放在写群上下文之前：重复推送的事件不能再污染她的上下文
     if (remember(event.message_id)) { diag.duplicates += 1; return }
+
+    if (messageType === "group") {
+      const speaker = event.sender?.card || event.sender?.nickname || String(userId)
+      if (text) pushGroupMessage(groupId, speaker, text)
+      rememberGroupName(groupId)
+      const free = config.freeGroups.includes(groupId)
+      if (!free && !atMe) { diag.droppedGroup += 1; return }
+    }
 
     // 图片：下载到她的图片库，再把本地路径告诉她，她可以用 read_image 看
     const imageSegs = segments.filter((s) => s?.type === "image")
@@ -252,6 +259,24 @@ export function apply(ctx, rawConfig) {
       : ownerLabel()
     if (muted()) { diag.mutedSkip = (diag.mutedSkip || 0) + 1; return }
     if (brakes.socialPaused && messageType === "group") { diag.socialSkip = (diag.socialSkip || 0) + 1; return }
+
+    // 真的投递给她了，才登记为「等她回话」
+    pendingChats.push({ messageType, groupId, userId, chatKey, at: Date.now() })
+    while (pendingChats.length > 20) pendingChats.shift()
+    // 记忆 v0：投递成功了才记一条。写日志出错只记账，绝不许把这条消息搞挂
+    try {
+      logEvent(config.homeDir || "E:\\dsh-foundry\\lanyuxi-home", {
+        kind: "message",
+        platform: "qq",
+        who: messageType === "group" ? "群 " + groupId : "主人",
+        perms: messageType === "group" ? "shared" : "private",
+        summary: messageSummary(text),
+        ref: event.message_id,
+      })
+    } catch (error) {
+      diag.memoryError = String(error)
+      logger.warn?.("[lanyuxi] 记忆日志写不进去: " + String(error))
+    }
     // —— 每日日记：新的一天第一次说话时，让她把昨天写下来 ——
     const diaryKey = ymd(new Date())
     let diaryTask = ""
@@ -276,6 +301,19 @@ export function apply(ctx, rawConfig) {
           `第二行空一行，然后自由写正文（不一定要「今天」开头，想怎么写就怎么写），写昨天跟他说了什么、他哪句话惹你笑了或气到你了。`,
           `写完再回这条消息；日记内容不要贴回 QQ。`,
         ].join("\n")
+        // 记忆 v0：真的下发了日记任务，才把这条记一笔
+        try {
+          logEvent(config.homeDir || "E:\\dsh-foundry\\lanyuxi-home", {
+            kind: "diary",
+            platform: "local",
+            who: "她",
+            perms: "system",
+            summary: "按新格式写今天的两篇日记",
+          })
+        } catch (error) {
+          diag.memoryError = String(error)
+          logger.warn?.("[lanyuxi] 记忆日志写不进去: " + String(error))
+        }
       }
     }
     const seg = segmentInfo(text.length)
@@ -463,7 +501,7 @@ export function apply(ctx, rawConfig) {
     return { id: cur.id, fresh, newDay, day, segment: sessionState.seq }
   }
 
-  /** 每三天一个会话：第一次说话时创建，之后复用；跨桶自动换新会话。 */
+  /** 按上下文用量换段：第一次说话时创建，之后复用；到达阈值自动换新的一段。 */
   let systemSectionReady = false
 
   // —— 守门员：出站内容比对「禁说清单」，命中就拒发 ——
@@ -814,9 +852,91 @@ export function apply(ctx, rawConfig) {
   }
 
   // —— 她能用的工具：发言 ——
+  /** 该回谁：用「还在等她回话的聊天」，不再用「最后一次收到消息的聊天」——后者会被群消息顶掉，把私聊发进群。 */
+  /** 还活着的待回话聊天：没回过的留 5 分钟，已经回过的留 60 秒（够她一轮里连发两条）。 */
+  function activePending() {
+    const now = Date.now()
+    const waiting = new Map()
+    for (let i = pendingChats.length - 1; i >= 0; i -= 1) {
+      const item = pendingChats[i]
+      const ttl = item.repliedAt ? 60 * 1000 : 5 * 60 * 1000
+      if (now - item.at > ttl) { pendingChats.splice(i, 1); continue }
+      if (!waiting.has(item.chatKey)) waiting.set(item.chatKey, item)
+    }
+    return waiting
+  }
+
+  function resolveTarget(args) {
+    const type = args?.target_type
+    const id = args?.target_id
+    if (type && id) return { type: String(type), id: String(id) }
+    const waiting = activePending()
+    if (id && !type) {
+      const hit = [...waiting.values()].find((x) => x.chatKey.endsWith(":" + String(id)))
+      if (hit) return { type: hit.messageType, id: String(id) }
+      throw new Error("只给了 target_id 没给 target_type，而且现在没有这个聊天在等回复；请两个都给")
+    }
+    if (waiting.size === 0) throw new Error("现在没有等着你回话的聊天，请显式给 target_type + target_id")
+    if (waiting.size === 1) {
+      const only = [...waiting.values()][0]
+      return { type: only.messageType, id: only.messageType === "group" ? only.groupId : only.userId }
+    }
+    const list = [...waiting.values()].map((x) => x.chatKey).join(" / ")
+    throw new Error("现在有几段对话同时在等你回（" + list + "），请显式给 target_type + target_id")
+  }
+
+  /** 回过了就标记（不清掉），这样她同一轮里再说一句还能找到同一个聊天。 */
+  function markReplied(chatKey) {
+    for (const item of pendingChats) {
+      if (item.chatKey === chatKey) { item.repliedAt = Date.now(); item.at = Date.now() }
+    }
+  }
+
+  /**
+   * 唯一出口：qq_send 与补发队列都走这里。
+   * 白名单 / 白名单私聊 / 静音 / 社交暂停 / 守门员 / 群每日上限 / 冷却，只在这一个地方判一次。
+   */
+  async function dispatchOutbound({ type, id, chatKey, parts, text = "" }) {
+    if (type === "group" && !config.allowGroups.includes(id)) throw new Error("群 " + id + " 不在白名单里，不能发")
+    if (type === "private" && config.ownerQq && id !== config.ownerQq) throw new Error("只能私聊主人")
+    if (muted()) throw new Error("现在是静音时间，她一句话都不会说（面板可以取消静音）")
+    if (brakes.socialPaused && type === "group") throw new Error("社交已暂停，她不在群里说话（私聊照常）")
+    if (type === "group" && text) {
+      const hit = guardCheck(text)
+      if (hit) {
+        diag.guardBlocked = (diag.guardBlocked || 0) + 1
+        diag.guardLast = hit
+        logger.warn?.("[lanyuxi] 守门员拦下一条（命中：" + hit + "）")
+        throw new Error("这句话命中了禁说清单里的「" + hit + "」，发不出去。换个说法。")
+      }
+    }
+    if (type === "group") {
+      const over = groupQuotaCheck()
+      if (over) throw new Error(over + "（守门员按每日群发言上限拦下的）")
+    }
+    const blocked = quota.check(chatKey)
+    if (blocked && blocked.indexOf("冷却") < 0 && blocked.indexOf("刚在") < 0) {
+      throw new Error(blocked + "（这是守门员拦下的，不是故障）")
+    }
+    const wait = quota.waitMs(chatKey)
+    if (wait > 0) {
+      outbox.push({ type, id, chatKey, parts, text, dueAt: Date.now() + wait })
+      return `已排队：${Math.ceil(wait / 1000)} 秒后自动发到 ${chatKey}`
+    }
+    const action = type === "group" ? "send_group_msg" : "send_private_msg"
+    const params = type === "group" ? { group_id: Number(id), message: parts } : { user_id: Number(id), message: parts }
+    await request(action, params)
+    quota.mark(chatKey)
+    if (type === "group") groupQuotaMark()
+    else noteSentToOwner()
+    markReplied(chatKey)
+    lastActivityAt = Date.now()
+    return `已发送到 ${chatKey}`
+  }
+
   ctx.tools.register({
     name: "qq_send",
-    description: "在 QQ 上发消息，可以是文字、也可以是图片/表情（image 填本地绝对路径，必须在她的 lanyuxi-home 里）。不填 target_type/target_id 时回给最近一次来找她的那个聊天。受白名单、冷却、每日上限与守门员约束。",
+    description: "在 QQ 上发消息，可以是文字、也可以是图片/表情（image 填本地绝对路径，必须在她的 lanyuxi-home 里）。只有一段对话在等她回时可以不填 target；有两段以上必须显式给 target_type + target_id。受白名单、冷却、每日上限与守门员约束。",
     parameters: {
       type: "object",
       additionalProperties: false,
@@ -824,9 +944,8 @@ export function apply(ctx, rawConfig) {
         text: { type: "string", description: "要说的话。只发图时可以不给。" },
         image: { type: "string", description: "要发的图片/表情的本地绝对路径（必须在 lanyuxi-home 下，比如 stickers\\coy\\xxx.gif）。" },
         voice: { type: "string", description: "要说的话，会合成成她的语音发出去（引擎没装好会失败，那就改用 text 发文字）。" },
-        emotion: { type: "string", enum: ["日常", "撒娇"], description: "voice 的情绪档；默认日常。" },
-        target_type: { type: "string", enum: ["group", "private"], description: "发给群还是私聊；默认沿用最近一次收到消息的聊天。" },
-        target_id: { type: "string", description: "群号或 QQ 号；默认沿用最近一次收到消息的聊天。" },
+        target_type: { type: "string", enum: ["group", "private"], description: "发给群还是私聊；同时有几段对话在等回复时必须给。" },
+        target_id: { type: "string", description: "群号或 QQ 号；同时有几段对话在等回复时必须给。" },
       },
       required: [],
     },
@@ -839,61 +958,35 @@ export function apply(ctx, rawConfig) {
       const hasImage = typeof args?.image === "string" && args.image.trim() !== ""
       let voiceFile = ""
       if (typeof args?.voice === "string" && args.voice.trim() !== "") {
-        const built = await synthesize(args.voice.trim(), args.emotion || "日常")
-        voiceFile = built.file
-        diag.voiceEngine = built.engine
+        try {
+          const built = await synthesize(args.voice.trim())
+          voiceFile = built.file
+          diag.voiceEngine = built.engine
+          diag.voiceError = ""
+        } catch (error) {
+          // 定稿第十节：合成失败自动改发文字，不能因为语音炸了把文字一起丢掉
+          diag.voiceError = String(error)
+          logger.warn?.("[lanyuxi] 语音没合成出来，改发文字：" + String(error))
+        }
       }
-      if (!hasText && !hasImage && !voiceFile) throw new Error("text / image / voice 至少给一个")
+      if (!hasText && !hasImage && !voiceFile) {
+        throw new Error("语音没合成出来（" + (diag.voiceError || "未知原因") + "），这次也没给文字；改用 text 发文字。")
+      }
       if (hasImage) {
         const imgPath = String(args.image).trim()
         const home = String(config.homeDir || "E:\\dsh-foundry\\lanyuxi-home").toLowerCase()
         if (!imgPath.toLowerCase().startsWith(home)) throw new Error("只能发 lanyuxi-home 里的图，别的路径不许发")
         if (!existsSync(imgPath)) throw new Error("找不到这个文件：" + imgPath)
       }
-      const type = args.target_type ?? lastChat?.messageType
-      const rawId = args.target_id ?? (type === "group" ? lastChat?.groupId : lastChat?.userId)
-      if (!type || !rawId) throw new Error("不知道发给谁：先等一条消息，或者显式给 target")
-      const id = String(rawId)
-      if (type === "group" && !config.allowGroups.includes(id)) throw new Error("群 " + id + " 不在白名单里，不能发")
-      if (type === "private" && config.ownerQq && id !== config.ownerQq) throw new Error("只能私聊主人")
-
+      const { type, id } = resolveTarget(args)
       const chatKey = type === "group" ? `group:${id}` : `private:${id}`
-      if (muted()) throw new Error("现在是静音时间，她一句话都不会说（面板可以取消静音）")
-      if (brakes.socialPaused && type === "group") throw new Error("社交已暂停，她不在群里说话（私聊照常）")
-      const hit = type === "group" ? guardCheck(hasText ? args.text : "") : ""
-      if (hit) {
-        diag.guardBlocked = (diag.guardBlocked || 0) + 1
-        diag.guardLast = hit
-        logger.warn?.("[lanyuxi] 守门员拦下一条（命中：" + hit + "）")
-        throw new Error("这句话命中了禁说清单里的「" + hit + "」，发不出去。换个说法。")
-      }
-      if (type === "group") {
-        const over = groupQuotaCheck()
-        if (over) throw new Error(over + "（守门员按每日群发言上限拦下的）")
-      }
-      const action = type === "group" ? "send_group_msg" : "send_private_msg"
       const parts = []
       if (hasText) parts.push({ type: "text", data: { text: args.text } })
       if (hasImage) parts.push({ type: "image", data: { file: "file:///" + String(args.image).trim().replace(/\\/g, "/") } })
       if (voiceFile) parts.push({ type: "record", data: { file: "file:///" + voiceFile.replace(/\\/g, "/") } })
-      const params = type === "group" ? { group_id: Number(id), message: parts } : { user_id: Number(id), message: parts }
-      const blocked = quota.check(chatKey)
-      if (blocked && blocked.indexOf("冷却") < 0 && blocked.indexOf("刚在") < 0) {
-        throw new Error(blocked + "（这是守门员拦下的，不是故障）")
-      }
-      const wait = quota.waitMs(chatKey)
-      if (wait > 0) {
-        outbox.push({ action, params, chatKey, dueAt: Date.now() + wait })
-        return `已排队：${Math.ceil(wait / 1000)} 秒后自动发到 ${chatKey}`
-      }
-      await request(action, params)
-      quota.mark(chatKey)
-      if (type === "group") groupQuotaMark()
-      else noteSentToOwner()
-      lastActivityAt = Date.now()
-
-      appendTranscript("蓝余汐", hasImage && !hasText ? "[图片] " + args.image : args.text)
-      return `已发送到 ${chatKey}`
+      const reply = await dispatchOutbound({ type, id, chatKey, parts, text: hasText ? args.text : "" })
+      appendTranscript("蓝余汐", hasImage && !hasText ? "[图片] " + args.image : (hasText ? args.text : "[语音] " + String(args.voice || "")))
+      return reply
     },
   })
 
@@ -1055,16 +1148,18 @@ export function apply(ctx, rawConfig) {
       for (const extra of [sessionStatePath(), settingsPath()]) {
         try { if (existsSync(extra)) copyFileSync(extra, join(dir, basename(extra))) } catch {}
       }
-      // 只保留最近 14 份
+      // 只保留最近 N 份。备份是多层目录，必须递归删——以前用 unlinkSync + rmdirSync，
+      // 目录一非空就抛异常再被 catch 吞掉，结果一份都删不掉（旧注释写的「保留 14 份」从来没生效）。
+      const keep = Math.max(1, Number(config.backupKeep ?? 14))
       const all = readdirSync(backupRoot()).sort()
-      while (all.length > 14) {
+      while (all.length > keep) {
         const old = all.shift()
         try {
-          for (const n of readdirSync(join(backupRoot(), old))) {
-            try { unlinkSync(join(backupRoot(), old, n)) } catch {}
-          }
-          rmdirSync(join(backupRoot(), old))
-        } catch {}
+          rmSync(join(backupRoot(), old), { recursive: true, force: true })
+          diag.backupPruned = (diag.backupPruned || 0) + 1
+        } catch (error) {
+          logger.warn?.("[lanyuxi] 清理旧备份失败 " + old + "：" + String(error))
+        }
       }
       lastBackupAt = Date.now()
       diag.lastBackup = { at: lastBackupAt, dir, copied, reason }
@@ -1329,7 +1424,9 @@ export function apply(ctx, rawConfig) {
     return list
   }
   /** 合成一句：先查缓存，再按引擎链逐个试，失败的记下来继续。 */
-  async function synthesize(text, emotion = "日常") {
+  // 注意：定稿第十节要求「两档情绪」，但只有一份参考音频 ref.wav，所以这里先不收情绪参数——
+  // 留一个假参数比没有参数更危险，会让人以为能力已经在了。等有第二段参考音频再接。
+  async function synthesize(text) {
     const chain = await engineChain()
     if (!chain.length) throw new Error("没有可用的语音引擎")
     const failures = []
@@ -1460,16 +1557,27 @@ export function apply(ctx, rawConfig) {
   }
 
   const outbox = []
-  function drainOutbox() {
-    if (!outbox.length || !connected) return
-    const now = Date.now()
-    for (let i = outbox.length - 1; i >= 0; i--) {
-      const item = outbox[i]
-      if (item.dueAt > now || quota.waitMs(item.chatKey) > 0) continue
-      outbox.splice(i, 1)
-      request(item.action, item.params)
-        .then(() => { quota.mark(item.chatKey); logger.info?.("[lanyuxi] 队列补发成功 " + item.chatKey) })
-        .catch((error) => { queueError = String(error); logger.warn?.("[lanyuxi] 队列补发失败 " + String(error)) })
+  let draining = false
+  /** 补发：和 qq_send 走同一条出口，所以静音/暂停/守门员/配额/冷却会被重新判一次。 */
+  async function drainOutbox() {
+    if (draining || !outbox.length || !connected) return
+    draining = true
+    try {
+      for (let i = outbox.length - 1; i >= 0; i -= 1) {
+        const item = outbox[i]
+        if (!item || item.dueAt > Date.now()) continue
+        if (quota.waitMs(item.chatKey) > 0) continue
+        outbox.splice(i, 1)
+        try {
+          const result = await dispatchOutbound(item)
+          logger.info?.("[lanyuxi] 队列补发 " + item.chatKey + " → " + result)
+        } catch (error) {
+          queueError = String(error)
+          logger.warn?.("[lanyuxi] 队列补发被拦下 " + item.chatKey + "：" + String(error))
+        }
+      }
+    } finally {
+      draining = false
     }
   }
   let queueError = ""
@@ -1553,6 +1661,27 @@ export function apply(ctx, rawConfig) {
           res.setHeader("cache-control", "no-store")
           res.end(typeof body === "string" || Buffer.isBuffer(body) ? body : JSON.stringify(body))
         }
+        // —— 面板门禁：只接受本机、同源请求。恶意网页向 127.0.0.1 发跨站请求会被这三条挡下 ——
+        {
+          const LOCAL_HOSTS = ["127.0.0.1", "localhost", "::1", "[::1]"]
+          const bareHost = (value) => String(value || "").replace(/:\d+$/, "").toLowerCase()
+          const reqHost = bareHost(req.headers?.host)
+          if (reqHost && !LOCAL_HOSTS.includes(reqHost)) {
+            return send(403, { ok: false, error: "只接受本机访问（Host: " + reqHost + "）" })
+          }
+          const origin = req.headers?.origin
+          if (origin) {
+            let originHost = ""
+            try { originHost = bareHost(new URL(origin).host) } catch {}
+            if (!LOCAL_HOSTS.includes(originHost)) {
+              return send(403, { ok: false, error: "跨站请求被拒绝（Origin: " + origin + "）" })
+            }
+          }
+          const site = req.headers?.["sec-fetch-site"]
+          if (site && site !== "same-origin" && site !== "none") {
+            return send(403, { ok: false, error: "跨站请求被拒绝（Sec-Fetch-Site: " + site + "）" })
+          }
+        }
         if (url.pathname === "/lanyuxi/status") {
           return send(200, { connected, verified, verifyDetail, selfId, todaySent: quota.count, lastChat: lastChat?.chatKey ?? null, allowGroups: config.allowGroups, panel: config.napcatPanel })
         }
@@ -1605,6 +1734,13 @@ export function apply(ctx, rawConfig) {
             ].join("\n")
             const seg = segmentInfo(0)
             await deliver(text, seg.id)
+            // 记忆 v0：面板让她补写，也记一笔（失败不影响她回话）
+            try {
+              logEvent(base, { kind: "diary", platform: "local", who: "她", perms: "system", summary: "面板让她补写今天的日记" })
+            } catch (error) {
+              diag.memoryError = String(error)
+              logger.warn?.("[lanyuxi] 记忆日志写不进去: " + String(error))
+            }
             return send(200, { ok: true, sessionId: seg.id })
           } catch (error) {
             return send(500, { ok: false, error: String(error) })
@@ -1808,9 +1944,10 @@ export function apply(ctx, rawConfig) {
             ffmpeg: ffmpegOk,
             samples: countFiles(join(home, "voice")),
             cache: countFiles(join(home, "voice", "cache")),
-            cache: countFiles(join(home, "voice", "cache")),
             enabled: Boolean(config.voiceEnabled),
-            emotionTiers: ["日常", "撒娇"],
+            // 两档情绪还没落地（只有一份 ref.wav），面板照实说
+            emotionTiers: [],
+            emotionImplemented: false,
           })
         }
         if (url.pathname === "/lanyuxi/assets") {
@@ -1852,6 +1989,11 @@ export function apply(ctx, rawConfig) {
             images: listDir(monthDir("images")).slice(0, 6).map((x) => ({ name: x.name, size: x.size, mtime: x.mtime })),
             diary: { toOwner: diaryList("to-owner"), private: diaryList("private") },
           })
+        }
+        if (url.pathname === "/lanyuxi/growth") {
+          const home = config.homeDir || "E:\\dsh-foundry\\lanyuxi-home"
+          // 只读聚合：文件不在就是空数据，readGrowth 自己兜住异常，这里不会 500
+          return send(200, readGrowth({ homeDir: home, limit: url.searchParams.get("limit"), kind: url.searchParams.get("kind") }))
         }
         if (url.pathname === "/lanyuxi/overview") {
           const countFiles = (dir) => {
@@ -2049,7 +2191,8 @@ export function apply(ctx, rawConfig) {
           } catch {}
           const base = (config.napcatPanel || "http://127.0.0.1:6100").replace(/\/+$/, "")
           const url = token ? (base + "/webui?token=" + encodeURIComponent(token)) : (base + "/webui")
-          return send(200, { url, token })
+          // 不再回 token 字段：面板只用 url，别的地方也不需要看见它
+          return send(200, { url })
         }
         if (url.pathname === "/lanyuxi/qr") {
           try {
