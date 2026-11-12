@@ -1295,6 +1295,12 @@ export function apply(ctx, rawConfig) {
     if (!res.ok) throw new Error("GPT-SoVITS 合成失败 HTTP " + res.status)
     const buf = Buffer.from(await res.arrayBuffer())
     if (buf.length < 1000) throw new Error("合成结果太小")
+    // 48kHz 单声道 16bit ≈ 96KB/秒：短于 0.6 秒基本等于没说话（多半是语言和文字不匹配）
+    const minBytes = 96000 * 0.6
+    if (buf.length < minBytes) {
+      throw new Error("合成结果是静音（只 " + Math.round(buf.length / 960) / 100 + " 秒）。" +
+        "多半是语言和文字对不上——英语模式要输入英文，日语模式要输入日文。")
+    }
     writeFileSync(out, buf)
     return out
   }

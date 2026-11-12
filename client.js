@@ -463,7 +463,7 @@ window.__ModuleLoader__.load({
             '</div>' +
             (d.warm && d.warm.total ? '<div class="small" style="margin-top:8px">预热：' + d.warm.done + ' / ' + d.warm.total + (d.warm.running ? '<span class="lyx-spin dark" style="width:10px;height:10px;vertical-align:-1px"></span>进行中' : '已完成') + (d.warm.error ? ' · ' + esc(d.warm.error) : '') + '</div>' : '') +
             '<div style="margin-top:14px"><div class="lbl">试听内容 <span class="small" id="lyx-voice-count" style="font-weight:400">0 / 30</span></div>' +
-              '<div class="hint" style="margin-bottom:6px">留空就挑一句已录好的；自己写的话要现场合成（CPU 约 150 秒）</div>' +
+              '<div class="hint" style="margin-bottom:6px" id="lyx-voice-hint">留空就挑一句已录好的；自己写的话要现场合成（CPU 约 150 秒）</div>' +
               '<input id="lyx-voice-text" type="text" maxlength="30" placeholder="比如：早啊，今天想我了吗" style="width:100%;box-sizing:border-box;text-align:left" /></div>';
           const sel = root.querySelector('#lyx-voice-engine');
           if (sel) sel.onchange = function () {
@@ -499,6 +499,14 @@ window.__ModuleLoader__.load({
               .catch(function () { lyxToast('接口不可用'); });
             setTimeout(function () { sw.disabled = false; }, 4000);
           };
+          const hintEl = root.querySelector('#lyx-voice-hint');
+          if (hintEl) {
+            hintEl.textContent = (d.voiceLang === 'en'
+              ? '英语模式：请用英文输入，输入中文会合成出静音'
+              : d.voiceLang === 'ja'
+                ? '日语模式：请用日文输入（汉字+假名），输入纯中文可能失真'
+                : '中文模式：留空就挑一句已录好的；自己写的话要现场合成（CPU 约 150 秒）');
+          }
           const textInput = root.querySelector('#lyx-voice-text');
           const counter = root.querySelector('#lyx-voice-count');
           if (textInput && counter) textInput.oninput = function () { counter.textContent = textInput.value.length + ' / 30'; };
