@@ -927,44 +927,53 @@ export function apply(ctx, rawConfig) {
     }
   }
 
-  /** 把消息灌进她今天的会话，让她醒过来。 */
-  async function deliver(text, sessionId) {
+  /** 只走 agents 这条路：成功 true，失败 false（不改会话状态） */
+  async function deliverViaAgent(text, sessionId) {
     const agents = ctx.get("agents")
-    if (agents) {
-      try {
-        const agent = await ensureAgentForBucket(sessionId)
-        const message = {
-          id: randomUUID(),
-          role: "user",
-          content: [{ type: "text", text }],
-          source: { kind: "user" },
-          time: Date.now(),
-        }
-        for (const method of ["followup", "queue", "send"]) {
-          if (typeof agent[method] === "function") {
-            await agent[method](message)
-            diag.via = "agent." + method + ":" + (sessionState.current ? sessionState.current.id : "?")
-            return
-          }
-        }
-        throw new Error("Agent 上没有可用的投递方法")
-      } catch (error) {
-        diag.via = "agents.failed"
-        diag.lastError = String(error)
-        logger.warn?.("[lanyuxi] agents 投递失败: " + String(error))
-        agentHandle = null
+    if (!agents) return false
+    try {
+      const agent = await ensureAgentForBucket(sessionId)
+      const message = {
+        id: randomUUID(),
+        role: "user",
+        content: [{ type: "text", text }],
+        source: { kind: "user" },
+        time: Date.now(),
       }
+      for (const method of ["followup", "queue", "send"]) {
+        if (typeof agent[method] === "function") {
+          await agent[method](message)
+          diag.via = "agent." + method + ":" + sessionId
+          return true
+        }
+      }
+      throw new Error("Agent 上没有可用的投递方法")
+    } catch (error) {
+      diag.via = "agents.failed"
+      diag.lastError = String(error)
+      logger.warn?.("[lanyuxi] agents 投递失败: " + String(error))
+      agentHandle = null
+      return false
     }
+  }
+
+  /** 把消息灌进她现在的会话。投不进去就自动换一段重投——
+   *  绝不静默丢消息，也绝不投进别的旧会话（旧段被归档/删掉是常见情况）。 */
+  async function deliver(text, sessionId) {
+    if (await deliverViaAgent(text, sessionId)) return
+    const seg = segmentInfo(String(text).length, true)
+    diag.autoRebuilt = true
+    logger.warn?.("[lanyuxi] 投递失败，自动换段重建：" + seg.id)
+    if (await deliverViaAgent(text, seg.id)) return
     const controller = ctx.get("sessionController")
-    if (!controller) throw new Error("sessionController 不可用")
-    const id = await ensureSession()
+    if (!controller) throw new Error("投递归失败，且 sessionController 不可用")
     await controller.prompt({
       requestId: randomUUID(),
-      sessionId: id,
+      sessionId: seg.id,
       mode: "queue",
       content: [{ type: "text", text }],
     })
-    diag.via = "sessionController.prompt"
+    diag.via = "sessionController.prompt:" + seg.id
   }
 
   function connect() {
@@ -2632,6 +2641,51 @@ export function apply(ctx, rawConfig) {
           const root = backupRoot()
           const list = existsSync(root) ? readdirSync(root).sort().reverse().slice(0, 10) : []
           return send(200, { root, backups: list, lastBackup: diag.lastBackup || null, error: diag.backupError || "" })
+        }
+        // —— 她的会话段：列出 / 切换（旧段被归档后，主人得能自己指定"让她用哪一段"）——
+        if (url.pathname === "/lanyuxi/segments") {
+          const root = sessionsRoot()
+          let list = []
+          try {
+            if (existsSync(root)) {
+              list = readdirSync(root, { withFileTypes: true })
+                .filter((e) => e.isDirectory() && /^lanyuxi-msg2-\d+$/.test(e.name))
+                .map((e) => {
+                  const file = join(root, e.name, "session.v4.jsonl.zstd")
+                  let mtime = 0
+                  let size = 0
+                  try { const st = statSync(file); mtime = st.mtimeMs; size = st.size } catch {}
+                  return { id: e.name, mtime, size, isCurrent: Boolean(sessionState.current && sessionState.current.id === e.name) }
+                })
+                .sort((a, b) => b.mtime - a.mtime)
+            }
+          } catch (error) { diag.segmentsError = String(error) }
+          return send(200, { current: sessionState.current ? sessionState.current.id : "", segments: list })
+        }
+        if (url.pathname === "/lanyuxi/segment") {
+          if (req.method !== "POST") return send(405, { ok: false, error: "用 POST" })
+          const use = String(url.searchParams.get("use") || "").trim()
+          if (!/^lanyuxi-msg2-\d+$/.test(use)) return send(400, { ok: false, error: "会话 id 不合法" })
+          if (!existsSync(join(sessionsRoot(), use))) return send(404, { ok: false, error: "找不到这个会话：" + use })
+          const today = ymd(new Date())
+          const prevId = sessionState.current && sessionState.current.id !== use ? sessionState.current.id : "lanyuxi-msg2-002"
+          let prevSummary = []
+          try { prevSummary = buildPrevSummary() } catch {}
+          sessionState.current = {
+            id: use,
+            chars: 0,
+            firstDay: today,
+            lastDay: today,
+            prevId,
+            prevSummary,
+            builtWithSetup: true,
+            titleBase: "",
+          }
+          saveSessionState()
+          agentHandle = null
+          diag.currentSwitched = use
+          logger.info?.("[lanyuxi] 当前会话切到 " + use)
+          return send(200, { ok: true, current: use, prevId })
         }
         if (url.pathname === "/lanyuxi/settings") {
           if (req.method === "POST") {
