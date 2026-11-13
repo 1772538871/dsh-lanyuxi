@@ -236,13 +236,45 @@ export function apply(ctx, rawConfig) {
     const imageSegs = segments.filter((s) => s?.type === "image")
     if (imageSegs.length) {
       const saved = []
+      // 诊断：把这一段原始结构留一份，出问题时能直接看 NapCat 到底给了什么字段
+      diag.imageSeen = (diag.imageSeen || 0) + imageSegs.length
+      try { diag.imageSegSample = JSON.stringify(imageSegs[0]).slice(0, 400) } catch {}
+      const napcatCache = join(config.napcatDir || "", "napcat", "cache")
       for (const seg of imageSegs.slice(0, 4)) {
         const url = seg?.data?.url || seg?.data?.file_url || ""
-        const fileName = String(seg?.data?.file || "image").slice(0, 40).replace(/[^\w.\-]/g, "_")
+        const rawFile = String(seg?.data?.file || "")
+        const fileName = String(rawFile || "image").slice(0, 40).replace(/[^\w.\-]/g, "_")
+        // 有的 NapCat 只给 data.file（本地缓存路径/文件名），不给 url：先试本地拷贝
         try {
-          if (!url) continue
+          const localCandidates = []
+          if (rawFile) {
+            localCandidates.push(rawFile)
+            localCandidates.push(join(napcatCache, basename(rawFile)))
+            localCandidates.push(join(config.napcatDir || "", "napcat", basename(rawFile)))
+          }
+          if (String(url).startsWith("file://")) localCandidates.push(String(url).slice(7))
+          for (const cand of localCandidates) {
+            try {
+              if (!cand || !existsSync(cand)) continue
+              const st = statSync(cand)
+              if (!st.isFile() || st.size === 0) continue
+              const now = new Date()
+              const month = now.getFullYear() + "-" + z2(now.getMonth() + 1)
+              const dir = join(config.homeDir || "E:\\dsh-foundry\\lanyuxi-home", "images", month)
+              mkdirSync(dir, { recursive: true })
+              const ext2 = (String(cand).match(/\.(jpg|jpeg|png|gif|webp)$/i) || [".jpg"])[0]
+              const out2 = join(dir, Date.now() + "-" + fileName.replace(/\.(jpg|jpeg|png|gif|webp)$/i, "") + ext2)
+              copyFileSync(cand, out2)
+              saved.push(out2)
+              diag.imageSource = "local:" + cand
+              const frames2 = extractGifFrames(out2)
+              if (frames2.length) saved.push("\u0000GIF\u0000" + frames2.join("、"))
+              break
+            } catch (e2) { diag.imageError = "local:" + String(e2) }
+          }
+          if (!url || saved.length) continue
           const res = await fetch(url)
-          if (!res.ok) continue
+          if (!res.ok) { diag.imageError = "http " + res.status + " " + String(url).slice(0, 120); continue }
           const buf = Buffer.from(await res.arrayBuffer())
           const now = new Date()
           const month = now.getFullYear() + "-" + z2(now.getMonth() + 1)
@@ -261,14 +293,15 @@ export function apply(ctx, rawConfig) {
         const plain = saved.filter((x) => x.indexOf("\u0000GIF\u0000") < 0)
         const gifs = saved.filter((x) => x.indexOf("\u0000GIF\u0000") >= 0).map((x) => x.replace("\u0000GIF\u0000", ""))
         const parts = []
-        if (plain.length) parts.push("（对方发了 " + plain.length + " 张图，已存到：" + plain.join("、") + "。想看清楚就用 read_image 打开它。）")
+        if (plain.length) parts.push("（对方发了 " + plain.length + " 张图，已存到：" + plain.join("、") + "。\n 必须先 read_image 打开看懂再回答：没看过这张图，不许评论图里有什么，更不许拿本机配置去顶替图里的内容。）")
         if (gifs.length) {
           const frameList = gifs.join("、").split("、").filter(Boolean)
           parts.push("（其中是动图，按每秒抽帧共 " + frameList.length + " 帧：\n" + frameList.join("\n") + "\n 逐帧 read_image 看，能看出它在动什么、想表达什么，别只看第一帧。）")
         }
         text = (text ? text + "\n" : "") + parts.join("\n")
       } else {
-        text = (text ? text + "\n" : "") + "（对方发了一张图，但没下载下来，你只看到一条图片提示。）"
+        diag.imageFail = true
+        text = (text ? text + "\n" : "") + "（对方发了一张图，但插件没下载下来——你看不到这张图。回答时不要假装看过，更不要用本机信息冒充图里的内容；可以直接说\"图没收到，你再说一遍或者换个方式发\"。）"
       }
     }
     const chatKey = chatKeyOf(messageType, groupId, userId)
