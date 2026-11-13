@@ -509,9 +509,13 @@ export function apply(ctx, rawConfig) {
     voiceEngine: config.voiceEngine || "gpt-sovits",
     voiceLang: config.gptSovitsTextLang || "zh",
     gptSovitsDir: config.gptSovitsDir || "E:\\GPT-SoVITS",
-    // 调试开关：把她这一轮拿到的系统提示抄一份附在用户消息里，方便在会话里确认她看到了什么。
+    // 回显开关：把她这一轮拿到的系统提示抄一份附在用户消息里，方便在会话里确认她看到了什么。
     // 系统提示本身不是消息、永远不会出现在会话里，所以"显示"只能靠回显。
-    echoSystemPrompt: false,
+    // 2026-11-13 按主人要求改为默认开。
+    echoSystemPrompt: true,
+    // 设置结构版本：升到这个版本时把 echoSystemPrompt 强制成"开"（一次性迁移），
+    // 否则老的 .lanyuxi-settings.json 里存的 false 会盖掉新默认值。
+    settingsVersion: 2,
   }
   try {
     if (existsSync(settingsPath())) {
@@ -523,6 +527,12 @@ export function apply(ctx, rawConfig) {
       if (loaded && ["zh", "ja", "en", "auto"].indexOf(loaded.voiceLang) >= 0) settings.voiceLang = loaded.voiceLang
       if (loaded && typeof loaded.gptSovitsDir === "string" && loaded.gptSovitsDir) settings.gptSovitsDir = loaded.gptSovitsDir
       if (loaded && typeof loaded.echoSystemPrompt === "boolean") settings.echoSystemPrompt = loaded.echoSystemPrompt
+      // v2 迁移：老设置文件没见过"默认开"，一律按新默认来；用户之后手动关仍然有效
+      if (!loaded || Number(loaded.settingsVersion || 1) < 2) {
+        settings.echoSystemPrompt = true
+        settings.settingsVersion = 2
+        try { writeFileSync(settingsPath(), JSON.stringify(settings, null, 2), "utf8") } catch {}
+      }
     }
   } catch {}
   function saveSettings() {
