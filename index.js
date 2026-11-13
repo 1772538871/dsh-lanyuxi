@@ -740,8 +740,8 @@ export function apply(ctx, rawConfig) {
       `你正在 QQ 上和${ownerLabel()}聊天（你的小号 ${selfId || "?"}，${ownerLabel()} ${config.ownerQq || "?"}）。`,
       "每收到一条消息，必须调用 qq_send 工具回一句话；只在会话里回答、不调用工具，主人是收不到的。",
       "qq_send 不填 target 就回给当前这个聊天。",
-      "这一轮结束后，你在会话里写出的那句话必须和 qq_send 发出去的一字不差——主人翻会话记录时，看到的就是他说了什么、你回了什么。",
-      "不许另编旁白、不许复述、不许只写「已回」这类占位句（那样主人就查不到你到底回过什么了）。",
+      "这一轮在会话里要留下两样东西：① 你的想法——想说什么、为什么这么说，可以嘴硬、可以吐槽、可以只给自己看；② 你真正发出去的那句话，原样写一遍。",
+      "只写想法不写正文不行，只写「已回」这种占位句更不行：主人是靠会话记录回看你说过什么的。",
     ]
     if (cur) lines.push(`当前会话 ${id}（第 ${sessionState.seq || 1} 段）。`)
     if (prev) lines.push(`上一段会话的 id 是 ${prev}；主人提到以前的事，先用会话检索去查那个 id 再回答。`)
@@ -1182,8 +1182,12 @@ export function apply(ctx, rawConfig) {
       if (hasImage) parts.push({ type: "image", data: { file: "file:///" + String(args.image).trim().replace(/\\/g, "/") } })
       if (voiceFile) parts.push({ type: "record", data: { file: "file:///" + voiceFile.replace(/\\/g, "/") } })
       const reply = await dispatchOutbound({ type, id, chatKey, parts, text: hasText ? args.text : "" })
+      const sentEcho = hasText
+        ? String(args.text)
+        : (hasImage ? "[图片] " + String(args.image).trim() : "[语音] " + String(args.voice || ""))
       appendTranscript("蓝余汐", hasImage && !hasText ? "[图片] " + args.image : (hasText ? args.text : "[语音] " + String(args.voice || "")))
-      return reply
+      // 工具结果里带上原话：就算她只写了想法，会话记录里也一定查得到她实际发出去的那句
+      return String(reply || "已发出") + "\n你刚发给" + (type === "group" ? "群 " + id + " 的原话：" : "主人的原话：") + sentEcho
     },
   })
 
