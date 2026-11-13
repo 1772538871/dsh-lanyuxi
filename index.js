@@ -735,6 +735,8 @@ export function apply(ctx, rawConfig) {
       `你正在 QQ 上和${ownerLabel()}聊天（你的小号 ${selfId || "?"}，${ownerLabel()} ${config.ownerQq || "?"}）。`,
       "每收到一条消息，必须调用 qq_send 工具回一句话；只在会话里回答、不调用工具，主人是收不到的。",
       "qq_send 不填 target 就回给当前这个聊天。",
+      "发完就结束这一轮：不要在会话里另写旁白、复述或解释你刚做了什么（主人只该看到他收到的那句）。",
+      "如果你确实想在这里留一句，那就必须和 qq_send 发出去的那句一字不差，不许另编一段。",
     ]
     if (cur) lines.push(`当前会话 ${id}（第 ${sessionState.seq || 1} 段）。`)
     if (prev) lines.push(`上一段会话的 id 是 ${prev}；主人提到以前的事，先用会话检索去查那个 id 再回答。`)
