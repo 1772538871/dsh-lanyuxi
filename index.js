@@ -396,14 +396,11 @@ export function apply(ctx, rawConfig) {
     }
     if (diaryTask) lines.push(diaryTask)
     if (personaTask) lines.push(personaTask)
-    if (!systemSectionReady) {
-      const persona = personaText()
-      if (persona) lines.push(persona.slice(0, 6000))
-      lines.push(
-        `你是蓝余汐，正在 QQ 上跟${ownerLabel()}聊天。回话必须调用 qq_send，只在会话里说不调工具对方收不到。` +
-        `当前会话 ${seg.id} 第 ${seg.segment} 段；上一段是 ${prevId || "（无）"}。现在 ${stampNow()}。`
-      )
-    }
+    // 这里原来有一段"兜底"：系统提示挂不上时，把人格卡 + 规矩整段塞进用户消息。
+    // 那正是消息又长又乱、且系统提示会出现在聊天记录里的根源，2026-11-13 按主人要求删除。
+    // 现在只走系统提示（agent.ctx 那条路）；真挂不上就只剩聊天内容，绝不污染消息——
+    // 失败会在 diag.systemSection 里写明原因，不再往会话里倒文字。
+    if (!systemSectionReady) diag.fallbackSkipped = true
     // 调试开关：把这一轮的系统提示抄一份附在用户消息里（系统提示本身不是消息，永远不出现在会话里）
     if (settings.echoSystemPrompt) {
       try {
@@ -632,6 +629,8 @@ export function apply(ctx, rawConfig) {
   let systemSectionReady = false
   /** 是否已经为「挂系统提示」强制换过一次段（只换一次，防抖） */
   let rebuiltOnce = false
+  /** 哪些会话已经挂过系统提示（per-session；用一个全局布尔会导致"第二段永远挂不上"） */
+  const promptAttached = new Set()
 
   // —— 守门员：出站内容比对「禁说清单」，命中就拒发 ——
   /** 主人称呼：一行多值，逗号/斜杠/顿号分隔，越靠前越优先。 */
@@ -740,10 +739,12 @@ export function apply(ctx, rawConfig) {
       `你正在 QQ 上和${ownerLabel()}聊天（你的小号 ${selfId || "?"}，${ownerLabel()} ${config.ownerQq || "?"}）。`,
       "每收到一条消息，必须调用 qq_send 工具回一句话；只在会话里回答、不调用工具，主人是收不到的。",
       "qq_send 不填 target 就回给当前这个聊天。",
-      "这一轮在会话里要留下两样东西：① 你的想法——想说什么、为什么这么说，可以嘴硬、可以吐槽、可以只给自己看；② 你真正发出去的那句话，原样写一遍。",
-      "只写想法不写正文不行，只写「已回」这种占位句更不行：主人是靠会话记录回看你说过什么的。",
+      "这一轮在会话里按这个形状写（主人要能一眼分清你想的和真发出去的）：",
+      "  先写你的想法、你做了什么（可以嘴硬、可以吐槽、可以只给自己看）；空一行；再写一行 发送：「你刚发出去的原话」",
+      "「发送：」后面必须和 qq_send 的正文一字不差。只写想法不写正文不行，只写「已回」这种占位句更不行。",
     ]
-    if (cur) lines.push(`当前会话 ${id}（第 ${sessionState.seq || 1} 段）。`)
+    const segNo = Number(String(id).replace(/\D+/g, "")) || sessionState.seq || 1
+    if (cur) lines.push(`当前会话 ${id}（第 ${segNo} 段）。`)
     if (prev) lines.push(`上一段会话的 id 是 ${prev}；主人提到以前的事，先用会话检索去查那个 id 再回答。`)
     else lines.push("这是第一段会话，没有更早的记录。")
     lines.push(`现在时间：${stampNow()}`)
@@ -782,7 +783,9 @@ export function apply(ctx, rawConfig) {
   function stickerRuleText() {
     return [
       "【看图与收藏的规矩】",
-      "收到图片或表情时，消息里会给你本地路径：先用 read_image 看懂它在表达什么，再决定理不理它。禁止凭文件名猜内容。",
+      "收到图片或表情时，消息里会给你本地路径：**先 read_image 真的看懂它，再开口**。没看过这张图，不许评论图里有什么，也不许猜。",
+      "图里的东西不等于问你话那个人的东西：看到装机单、配置表、价签、别人家的截图，要先把话分清楚——\"图里那张单子写的是 i5-13600KF + RTX3060Ti、7899 元\"，再说\"你这台机器我看了是 i5-12400\"。两件事分开讲，不许混成一句。",
+      "拿不准那张图是什么、或者跟眼前的对话对不上（比如他没提过要装机），就直接问一句\"这单子哪来的？要我帮你看什么\"，别自己脑补。",
       "想收藏就调用 sticker_save：mood 按你理解到的情绪归到 happy/speechless/coy/fierce，name 写成「情绪-它表达的意思」（例：开心-猫猫点头）。",
       "主人说「这张归错了」「这不叫撒娇」时，用 sticker_move 把那一张挪到对的那档、顺便改名。只动这一张，不要批量挪别的。",
       "图里有主人（截图、聊天记录、带名字的）：先用 image_mark 标成禁外发，再考虑要不要发。",
@@ -836,14 +839,18 @@ export function apply(ctx, rawConfig) {
     let agent = agents.get(key)
     if (agent) {
       diag.freshSession = false
-      // 已存在的 agent 不会再跑 setup：这里补挂一次，否则人格卡/日记规矩都进不了系统提示，
-      // 只能退回"把人格塞进用户消息"——那正是消息变得又长又啰嗦的原因。
-      if (!systemSectionReady) {
+      // 已存在的 agent 不会再跑 setup：这里补挂一次。
+      // 关键：要挂的是 agent.ctx（agent 作用域的 Context），不是 agent 本身——
+      // setup 里用的 ctx.get("systemPrompt") 只有拿到 scoped Context 才拿得到。
+      if (!promptAttached.has(key)) {
         try {
-          setupAgentPrompt(agent)
-          if (!systemSectionReady) markSystemSection("no-api:已有 agent 上没有 systemPrompt 接口")
+          setupAgentPrompt(agent.ctx || agent)
+          promptAttached.add(key)
+          if (!systemSectionReady) markSystemSection("no-api:agent.ctx 上也拿不到 systemPrompt")
         } catch (error) {
-          markSystemSection("failed: " + String(error))
+          // 挂不上就只记一笔、这一段不再重试；绝不再往用户消息里塞人格（失败一次就够）
+          promptAttached.add(key)
+          markSystemSection("failed:" + key + ":" + String(error))
         }
       }
       return agent
@@ -865,6 +872,7 @@ export function apply(ctx, rawConfig) {
       agentHandle = handle
       diag.via = "create:" + key
       diag.freshSession = true
+      promptAttached.add(key)
     } catch (createError) {
       const handle = await agents.resume({ resumeSessionId: key, agentOptions, setup: setupAgentPrompt })
       agent = handle.agent
@@ -2558,7 +2566,7 @@ export function apply(ctx, rawConfig) {
             blocked: diag.guardBlocked || 0,
             mutedSkip: diag.mutedSkip || 0,
             socialSkip: diag.socialSkip || 0,
-            session: cur ? { id: cur.id, segment: sessionState.seq || 1, chars: cur.chars, limit: currentLimit(), percent: Math.round(cur.chars / currentLimit() * 100) } : null,
+            session: cur ? { id: cur.id, segment: Number(String(cur.id).replace(/\D+/g, "")) || sessionState.seq || 1, chars: cur.chars, limit: currentLimit(), percent: Math.round(cur.chars / currentLimit() * 100) } : null,
             recent,
             assets: {
               stickers: countFiles(join(home, "stickers")),
