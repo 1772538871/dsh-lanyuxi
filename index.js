@@ -217,6 +217,30 @@ export function apply(ctx, rawConfig) {
       if (!config.allowGroups.includes(groupId)) { diag.droppedGroup += 1; return }
     } else if (messageType === "private") {
       if (config.ownerQq && userId !== config.ownerQq) { diag.droppedPrivate += 1; return }
+      // QQ 审批桥：主人对「要你定一下」的回答，先吃掉，别当成普通聊天（也就不会去打断她的判断）
+      if (pendingApproval) {
+        const t = text.trim()
+        const yes = /^(允许|可以|行|同意|批准|放行|好|1|y|yes|ok)$/i.test(t)
+        const no = /^(拒绝|不行|不许|不准|不同意|2|n|no)$/i.test(t)
+        if (yes || no) {
+          const waiting = pendingApproval
+          pendingApproval = null
+          try { waiting.done(yes ? "allowed-once" : "rejected") } catch (error) { diag.approvalResolveError = String(error) }
+          appendTranscript(ownerLabel(), t)
+          const back = yes ? "好，这次放行。" : "好，那这个我不做了。"
+          try {
+            await dispatchOutbound({
+              type: "private",
+              id: config.ownerQq,
+              chatKey: "private:" + config.ownerQq,
+              parts: [{ type: "text", data: { text: back } }],
+              text: back,
+            })
+          } catch (error) { diag.approvalReplyError = String(error) }
+          diag.approvalOutcome = yes ? "allowed-once" : "rejected"
+          return
+        }
+      }
     } else {
       return
     }
@@ -675,6 +699,69 @@ export function apply(ctx, rawConfig) {
   /** 哪些会话已经挂过系统提示（per-session；用一个全局布尔会导致"第二段永远挂不上"） */
   const promptAttached = new Set()
 
+  // —— QQ 审批桥：DSH 要主人拍板时，把问题发到 QQ，主人回「允许/拒绝」就继续 ——
+  // 否则审批只弹在 DSH 界面上，主人在 QQ 那边压根看不见，活就卡死。
+  let pendingApproval = null
+  function approvalAskText(req) {
+    const tool = String(req?.toolName || "一个需要授权的操作")
+    const reason = String(req?.reason || "").replace(/\s+/g, " ").trim().slice(0, 240)
+    return [
+      "【要你定一下】",
+      "她要动一个需要你点头的操作：" + tool,
+      reason ? "原因：" + reason : "",
+      "回「允许」= 只放行这一次；回「拒绝」= 不许。3 分钟不回我就当没看见（不会替你答应）。",
+    ].filter(Boolean).join("\n")
+  }
+  async function askOwnerByQQ(req) {
+    const text = approvalAskText(req)
+    try {
+      await dispatchOutbound({
+        type: "private",
+        id: config.ownerQq,
+        chatKey: "private:" + config.ownerQq,
+        parts: [{ type: "text", data: { text } }],
+        text,
+      })
+    } catch (error) {
+      diag.approvalSendError = String(error)
+      return null
+    }
+    appendTranscript("蓝余汐", "【要你定一下】" + String(req?.toolName || ""))
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        if (pendingApproval && pendingApproval.done === done) pendingApproval = null
+        done(null)
+      }, 180000)
+      function done(outcome) { clearTimeout(timer); resolve(outcome) }
+      pendingApproval = {
+        at: Date.now(),
+        toolName: String(req?.toolName || ""),
+        segId: String(req?.agent?.session?.id || ""),
+        done,
+      }
+    })
+  }
+  try {
+    if (typeof ctx.on === "function") {
+      ctx.on("approval/request", async (req, next) => {
+        const segId = String(req?.agent?.session?.id || "")
+        if (!/^lanyuxi-msg/.test(segId) || !config.ownerQq) return next()
+        diag.approvalAsked = (diag.approvalAsked || 0) + 1
+        const outcome = await askOwnerByQQ(req)
+        if (outcome === "allowed-once" || outcome === "rejected") {
+          diag.approvalOutcome = outcome
+          return outcome
+        }
+        diag.approvalOutcome = pendingApproval ? "timeout-delegated" : "delegated"
+        return next()
+      })
+    } else {
+      diag.approvalHookError = "ctx.on 不可用"
+    }
+  } catch (error) {
+    diag.approvalHookError = String(error)
+  }
+
   // —— 守门员：出站内容比对「禁说清单」，命中就拒发 ——
   /** 主人称呼：一行多值，逗号/斜杠/顿号分隔，越靠前越优先。 */
   function ownerAliases() {
@@ -785,6 +872,9 @@ export function apply(ctx, rawConfig) {
       "这一轮在会话里按这个形状写（主人要能一眼分清你想的和真发出去的）：",
       "  先写你的想法、你做了什么（可以嘴硬、可以吐槽、可以只给自己看）；空一行；再写一行 发送：「你刚发出去的原话」",
       "「发送：」后面必须和 qq_send 的正文一字不差。只写想法不写正文不行，只写「已回」这种占位句更不行。",
+      "接到要动手的活（查东西、改配置、装软件、写文件）：先 qq_send 一句「我打算怎么做」，可以带一句你的态度/吐槽，然后再开工——别闷头干完才吭声。",
+      "需要他拍板的事（写工作区以外的文件、删东西、花钱、动他的机器）：不要自己替他决定，也不要编一个答案糊过去。插件会把问题发到他 QQ 上，他回「允许/拒绝」，你按他的选择继续或停止。",
+      "他回话之后：先按他选的做，做完再回一句结果；他不回就等，别自作主张。",
     ]
     const segNo = Number(String(id).replace(/\D+/g, "")) || sessionState.seq || 1
     if (cur) lines.push(`当前会话 ${id}（第 ${segNo} 段）。`)
