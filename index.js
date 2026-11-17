@@ -2807,6 +2807,20 @@ export function apply(ctx, rawConfig) {
         // —— 表情库体检：把"头像/照片混进表情库"的嫌疑项列出来，可一键移出（不删，挪到 _quarantine）——
         if (url.pathname === "/lanyuxi/stickers/audit") {
           const home = config.homeDir || "E:\\dsh-foundry\\lanyuxi-home"
+          // 判据只认一件事：内容与 avatar/ 或 inbox/ 里的文件完全相同（= 真把头头像当表情收了）。
+          // 早期版本用"png/jpg 且 <400KB"当嫌疑判据，会把 36 张真表情误判——已废弃。
+          const srcHashes = new Map()
+          for (const dirName of ["avatar", "inbox"]) {
+            const d = join(home, dirName)
+            if (!existsSync(d)) continue
+            for (const e of readdirSync(d, { withFileTypes: true })) {
+              if (!e.isFile()) continue
+              try {
+                const h = createHash("md5").update(readFileSync(join(d, e.name))).digest("hex")
+                srcHashes.set(h, dirName + "\\" + e.name)
+              } catch {}
+            }
+          }
           const out = []
           for (const mood of ["happy", "speechless", "coy", "fierce"]) {
             const dir = join(home, "stickers", mood)
@@ -2817,9 +2831,13 @@ export function apply(ctx, rawConfig) {
               let mtime = 0
               try { const st = statSync(join(dir, e.name)); size = st.size; mtime = st.mtimeMs } catch {}
               const ext = (e.name.match(/\.[a-z0-9]+$/i) || [""])[0].toLowerCase()
-              // 嫌疑判据：png/jpg 且体积小（表情一般是 gif/webp；头像/截图多是 png/jpg）
-              const suspect = (ext === ".png" || ext === ".jpg" || ext === ".jpeg") && size < 400 * 1024
-              out.push({ mood, name: e.name, size, mtime, suspect })
+              if (![".png", ".jpg", ".jpeg", ".gif", ".webp"].includes(ext)) continue
+              let reason = ""
+              try {
+                const h = createHash("md5").update(readFileSync(join(dir, e.name))).digest("hex")
+                if (srcHashes.has(h)) reason = "与 " + srcHashes.get(h) + " 内容相同"
+              } catch {}
+              out.push({ mood, name: e.name, size, mtime, suspect: Boolean(reason), reason })
             }
           }
           if (req.method === "POST") {
