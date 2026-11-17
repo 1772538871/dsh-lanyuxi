@@ -2142,6 +2142,61 @@ export function apply(ctx, rawConfig) {
   function saveBili() {
     try { writeFileSync(biliPath(), JSON.stringify(bili, null, 2), "utf8") } catch (error) { diag.biliError = String(error) }
   }
+  // —— B 站扫码登录（M5）：协议已实测 ——
+  //   生成：GET passport.../qrcode/generate → { qrcode_key, url }
+  //   轮询：GET passport.../qrcode/poll?qrcode_key=… → data.code 86101 未扫码 / 86090 已扫未确认 / 86038 失效 / 0 成功
+  //   成功时 Cookie 在响应的 Set-Cookie 里（SESSDATA / bili_jct / DedeUserID / buvid3）
+  //   手机浏览器直接打开 url 也能完成（scan-web 页面 200），所以不需要在本地生成二维码图片
+  const BILI_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+  let biliQr = { key: "", url: "", at: 0 }
+  async function biliQrGenerate() {
+    const res = await fetch("https://passport.bilibili.com/x/passport-login/web/qrcode/generate", {
+      headers: { "User-Agent": BILI_UA, Referer: "https://www.bilibili.com/", Origin: "https://www.bilibili.com" },
+    })
+    const json = await res.json()
+    if (!json || json.code !== 0 || !json.data || !json.data.qrcode_key) {
+      throw new Error("拿二维码失败：" + (json?.message || ("HTTP " + res.status)))
+    }
+    biliQr = { key: json.data.qrcode_key, url: json.data.url, at: Date.now() }
+    diag.biliQrAt = biliQr.at
+    return { url: json.data.url, key: json.data.qrcode_key, expiresInSec: 180 }
+  }
+  async function biliQrPoll() {
+    if (!biliQr.key) throw new Error("还没生成二维码，先点扫码绑定")
+    const res = await fetch("https://passport.bilibili.com/x/passport-login/web/qrcode/poll?qrcode_key=" + encodeURIComponent(biliQr.key), {
+      headers: { "User-Agent": BILI_UA, Referer: "https://www.bilibili.com/", Origin: "https://www.bilibili.com" },
+    })
+    const json = await res.json()
+    const code = json?.data?.code
+    if (code === 0) {
+      const jar = {}
+      const lines = typeof res.headers.getSetCookie === "function" ? res.headers.getSetCookie() : []
+      for (const line of lines) {
+        const first = String(line).split(";")[0]
+        const i = first.indexOf("=")
+        if (i > 0) jar[first.slice(0, i).trim()] = first.slice(i + 1).trim()
+      }
+      const picked = ["SESSDATA", "bili_jct", "DedeUserID", "DedeUserID__ckMd5", "sid", "buvid3"]
+      const parts = picked.filter((k) => jar[k]).map((k) => k + "=" + jar[k])
+      if (!jar.SESSDATA) {
+        diag.biliQrError = "登录成功但没拿到 SESSDATA（Set-Cookie 数量：" + lines.length + "）"
+        return { status: "error", message: diag.biliQrError }
+      }
+      bili.cookie = parts.join("; ")
+      bili.profile = await biliNav()
+      bili.checkedAt = Date.now()
+      saveBili()
+      biliQr = { key: "", url: "", at: 0 }
+      diag.biliLoginAt = Date.now()
+      logger.info?.("[lanyuxi] B 站扫码登录成功：" + (bili.profile?.name || "?"))
+      return { status: "ok", profile: bili.profile, cookieCount: parts.length }
+    }
+    const map = { 86101: "waiting", 86090: "scanned", 86038: "expired" }
+    const status = map[code] || ("unknown:" + code)
+    if (status === "expired") biliQr = { key: "", url: "", at: 0 }
+    return { status, code, message: json?.data?.message || json?.message || "" }
+  }
+
   async function biliNav() {
     if (!bili.cookie) return null
     try {
@@ -2401,6 +2456,37 @@ export function apply(ctx, rawConfig) {
             return send(200, { ok: true, sessionId: seg.id })
           } catch (error) {
             return send(500, { ok: false, error: String(error) })
+          }
+        }
+        // —— B 站扫码登录：生成二维码 / 轮询结果 ——
+        if (url.pathname === "/lanyuxi/bili/qr") {
+          try {
+            const q = await biliQrGenerate()
+            // 顺手发到主人 QQ：手机上点开链接就能确认登录，不必再找第二台设备扫码
+            let sentToQQ = false
+            try {
+              const msg = "【B站登录】" + q.url + "\n（用手机点开这个链接确认登录；约 3 分钟有效。面板里也在等结果。）"
+              await dispatchOutbound({
+                type: "private",
+                id: config.ownerQq,
+                chatKey: "private:" + config.ownerQq,
+                parts: [{ type: "text", data: { text: msg } }],
+                text: msg,
+              })
+              sentToQQ = true
+            } catch (error) {
+              diag.biliQrSendError = String(error)
+            }
+            return send(200, { ok: true, ...q, sentToQQ })
+          } catch (error) {
+            return send(500, { ok: false, error: String(error?.message || error) })
+          }
+        }
+        if (url.pathname === "/lanyuxi/bili/qr/poll") {
+          try {
+            return send(200, { ok: true, ...(await biliQrPoll()) })
+          } catch (error) {
+            return send(500, { ok: false, error: String(error?.message || error) })
           }
         }
         if (url.pathname === "/lanyuxi/bili") {
