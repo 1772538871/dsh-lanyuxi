@@ -1651,14 +1651,34 @@ export function apply(ctx, rawConfig) {
       const home = config.homeDir || "E:\\dsh-foundry\\lanyuxi-home"
       if (!src.toLowerCase().startsWith(String(home).toLowerCase())) throw new Error("只能收藏 lanyuxi-home 里的图")
       if (!existsSync(src)) throw new Error("找不到这个文件：" + src)
+      // 闸一：inbox 里的是群友头像/临时下载件，不是表情——这正是"表情库被头像灌满"的源头
+      if (/[\\/]inbox[\\/]/i.test(src)) {
+        throw new Error("inbox 里那些是群友头像或临时图，不算表情，不许塞进表情库。要收就收真正的表情图（images\\ 下你刚看过的那种）。")
+      }
+      // 闸二：一天最多收 10 张，防"一口气收藏 39 张"这种批量灌库
+      const dailyCap = 10
+      const capPath = join(config.sessionCwd || process.cwd(), ".lanyuxi-sticker-count.json")
+      let cap = { day: "", n: 0 }
+      try { if (existsSync(capPath)) cap = JSON.parse(readFileSync(capPath, "utf8")) } catch {}
+      const todayKey = ymd(new Date())
+      if (cap.day !== todayKey) cap = { day: todayKey, n: 0 }
+      if (cap.n >= dailyCap) throw new Error("今天已经收了 " + cap.n + " 张表情（上限 " + dailyCap + " 张）。别把表情库塞满，明天再挑。")
+      // 闸三：超过 2MB 的多半是照片/长图，不是表情
+      let size = 0
+      try { size = statSync(src).size } catch {}
+      if (size > 2 * 1024 * 1024) throw new Error("这张图 " + Math.round(size / 1024) + " KB，太大，多半是照片或长图，不是表情。")
       const ext = (src.match(/\.(gif|png|jpg|jpeg|webp)$/i) || [".gif"])[0].toLowerCase()
       const safe = (rawName || "表情").replace(/[\\/:*?"<>|]/g, "").slice(0, 20)
       const dir = join(home, "stickers", mood)
       mkdirSync(dir, { recursive: true })
       const dest = join(dir, safe + ext)
       copyFileSync(src, dest)
+      cap.n += 1
+      try { writeFileSync(capPath, JSON.stringify(cap), "utf8") } catch {}
       diag.stickersSaved = (diag.stickersSaved || 0) + 1
-      return "已收藏到 " + dest + "。想用就调用 qq_send 并把 image 填成这个路径。"
+      diag.stickersToday = cap.n
+      try { logEvent(home, { kind: "action", platform: "local", who: "她", perms: "system", summary: "收藏表情（" + mood + "）：" + safe + ext }) } catch {}
+      return "已收藏到 " + dest + "（今天第 " + cap.n + "/" + dailyCap + " 张）。想用就调用 qq_send 并把 image 填成这个路径。"
     },
   })
 
@@ -2783,6 +2803,45 @@ export function apply(ctx, rawConfig) {
           const list = existsSync(root) ? readdirSync(root).sort().reverse().slice(0, 10) : []
           return send(200, { root, backups: list, lastBackup: diag.lastBackup || null, error: diag.backupError || "" })
         }
+        // —— 表情库体检：把"头像/照片混进表情库"的嫌疑项列出来，可一键移出（不删，挪到 _quarantine）——
+        if (url.pathname === "/lanyuxi/stickers/audit") {
+          const home = config.homeDir || "E:\\dsh-foundry\\lanyuxi-home"
+          const out = []
+          for (const mood of ["happy", "speechless", "coy", "fierce"]) {
+            const dir = join(home, "stickers", mood)
+            if (!existsSync(dir)) continue
+            for (const e of readdirSync(dir, { withFileTypes: true })) {
+              if (!e.isFile()) continue
+              let size = 0
+              let mtime = 0
+              try { const st = statSync(join(dir, e.name)); size = st.size; mtime = st.mtimeMs } catch {}
+              const ext = (e.name.match(/\.[a-z0-9]+$/i) || [""])[0].toLowerCase()
+              // 嫌疑判据：png/jpg 且体积小（表情一般是 gif/webp；头像/截图多是 png/jpg）
+              const suspect = (ext === ".png" || ext === ".jpg" || ext === ".jpeg") && size < 400 * 1024
+              out.push({ mood, name: e.name, size, mtime, suspect })
+            }
+          }
+          if (req.method === "POST") {
+            const apply = url.searchParams.get("apply") === "1"
+            const targets = out.filter((x) => x.suspect)
+            if (!apply) return send(200, { ok: true, dryRun: true, suspects: targets, total: out.length })
+            let moved = 0
+            const destRoot = join(home, "stickers", "_quarantine")
+            for (const x of targets) {
+              try {
+                const destDir = join(destRoot, x.mood)
+                mkdirSync(destDir, { recursive: true })
+                renameSync(join(home, "stickers", x.mood, x.name), join(destDir, x.name))
+                moved += 1
+              } catch (error) { diag.stickerQuarantineError = String(error) }
+            }
+            diag.stickersQuarantined = (diag.stickersQuarantined || 0) + moved
+            logger.info?.("[lanyuxi] 表情库体检：移出嫌疑项 " + moved + " 个")
+            return send(200, { ok: true, moved, dest: destRoot })
+          }
+          return send(200, { ok: true, total: out.length, suspects: out.filter((x) => x.suspect) })
+        }
+
         // —— 她的会话段：列出 / 切换（旧段被归档后，主人得能自己指定"让她用哪一段"）——
         if (url.pathname === "/lanyuxi/segments") {
           const root = sessionsRoot()
