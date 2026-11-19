@@ -663,6 +663,54 @@ window.__ModuleLoader__.load({
         return function () { dead = true; qrStop(); };
       }, [tab]);
 
+      // —— 全局：所有页面里的三张平台卡片都按真实数据刷新 ——
+      // 原型把卡片复制到了多个页面，且带假数据（submitmate / 2484026025 / 今日发言 0 条 / 已登录）。
+      // 这里统一口径：没接入就只显示「未接入 / 未登录 / —」，接入了才显示对应信息。
+      React.useEffect(function () {
+        const scope = document.querySelector('.lyx-scope');
+        if (!scope) return;
+        let dead = false;
+        function paintOne(id, info) {
+          Array.prototype.slice.call(scope.querySelectorAll('#' + id)).forEach(function (pill) {
+            const card = pill.closest('.card');
+            if (!card) return;
+            const ok = Boolean(info.ok);
+            pill.className = 'pill ' + (ok ? 'ok' : 'off');
+            pill.textContent = ok ? (info.pill || '已登录') : '未接入';
+            const nm = card.querySelector('.nm');
+            const sub = card.querySelector('.sub');
+            if (nm) {
+              nm.innerHTML = ok
+                ? String(info.name || '已登录') + ' <span class="acc">' + String(info.acc || '—') + '</span>'
+                : '未登录 <span class="acc">—</span>';
+            }
+            if (sub) sub.textContent = ok ? String(info.sub || '') : String(info.offText || '还没接入，不显示任何数据');
+          });
+        }
+        function paintCards(qq, bili) {
+          paintOne('st-qq', {
+            ok: Boolean(qq && qq.connected && qq.verified),
+            name: qq && (qq.selfNickname || '已登录'),
+            acc: qq && qq.selfId ? qq.selfId : '—',
+            sub: '今日发言 ' + ((qq && qq.todaySent) || 0) + ' 条',
+            offText: '还没扫码登录，绑不上就不算接入',
+          });
+          paintOne('st-bili', {
+            ok: Boolean(bili && bili.loggedIn && bili.profile),
+            name: bili && bili.profile ? bili.profile.name : '已登录',
+            acc: bili && bili.profile ? 'UID ' + bili.profile.uid : '—',
+            sub: bili && bili.profile ? ('Lv' + (bili.profile.level || 0)) : '',
+            offText: '还没扫码，不显示任何资料（不假装有数据）',
+          });
+          paintOne('st-wx', { ok: false, offText: '微信还没接（M6）' });
+        }
+        Promise.all([
+          fetch('/lanyuxi/overview', { cache: 'no-store' }).then(function (r) { return r.json(); }).catch(function () { return null; }),
+          fetch('/lanyuxi/bili', { cache: 'no-store' }).then(function (r) { return r.json(); }).catch(function () { return null; }),
+        ]).then(function (res) { if (!dead) paintCards(res[0], res[1]); });
+        return function () { dead = true; };
+      }, [tab]);
+
       // —— 全局：其它页面里的扫码按钮（原型把它们复制到了总览/人格/权限页）——
       // 只做一件事：掀掉死 onclick，改成"跳到平台接入页"，不再让用户点了只看到「这个平台还没接」。
       React.useEffect(function () {

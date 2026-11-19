@@ -916,7 +916,7 @@ export function apply(ctx, rawConfig) {
       "需要他拍板的事（写工作区以外的文件、删东西、花钱、动他的机器）：不要自己替他决定，也不要编一个答案糊过去。插件会把问题发到他 QQ 上，他回「允许/拒绝」，你按他的选择继续或停止。",
       "他回话之后：先按他选的做，做完再回一句结果；他不回就等，别自作主张。",
     ]
-    const segNo = Number(String(id).replace(/\D+/g, "")) || sessionState.seq || 1
+    const segNo = Number((String(id).match(/(\d+)$/) || [])[1]) || sessionState.seq || 1
     if (cur) lines.push(`当前会话 ${id}（第 ${segNo} 段）。`)
     if (prev) lines.push(`上一段会话的 id 是 ${prev}；主人提到以前的事，先用会话检索去查那个 id 再回答。`)
     else lines.push("这是第一段会话，没有更早的记录。")
@@ -2846,7 +2846,7 @@ export function apply(ctx, rawConfig) {
             blocked: diag.guardBlocked || 0,
             mutedSkip: diag.mutedSkip || 0,
             socialSkip: diag.socialSkip || 0,
-            session: cur ? { id: cur.id, segment: Number(String(cur.id).replace(/\D+/g, "")) || sessionState.seq || 1, chars: cur.chars, limit: currentLimit(), percent: Math.round(cur.chars / currentLimit() * 100) } : null,
+            session: cur ? { id: cur.id, segment: Number((String(cur.id).match(/(\d+)$/) || [])[1]) || sessionState.seq || 1, chars: cur.chars, limit: currentLimit(), percent: Math.round(cur.chars / currentLimit() * 100) } : null,
             recent,
             assets: {
               stickers: countFiles(join(home, "stickers")),
