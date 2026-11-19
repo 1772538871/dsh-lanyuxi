@@ -418,15 +418,33 @@ window.__ModuleLoader__.load({
         let qrActive = false;
         const QR_MAX_POLLS = 90;   // 上限 90 次 × 2 秒 = 3 分钟，到点就停
         const QR_POLL_MS = 2000;
-        const qrBtn = biliCard.querySelector('button[data-lyx-qr]')
-          || biliCard.querySelector('button[onclick*="openScan"]')
-          || Array.prototype.slice.call(biliCard.querySelectorAll('button')).filter(function (b) { return (b.textContent || '').indexOf('扫码绑定') >= 0; })[0]
-          || null;
-        if (qrBtn) {
-          qrBtn.setAttribute('data-lyx-qr', 'bili');
-          qrBtn.removeAttribute('onclick'); // 掀掉原型里 openScan('bili') 的「这个平台还没接」，也不再被全局扫码按钮同步改写文案
-          qrBtn.textContent = '扫码绑定';
-        }
+        // 卡片里有**两颗**扫码按钮（底部那颗、以及折叠区「① 扫码登录」旁边那颗）。
+        // 之前只接第一颗，用户点到底部那颗时走的还是原型 openScan()，所以看起来"B 站扫码没实现"。
+        const qrBtns = Array.prototype.slice.call(biliCard.querySelectorAll('button')).filter(function (b) {
+          if (b.getAttribute('data-lyx-qr') === 'bili') return true;
+          if ((b.textContent || '').indexOf('扫码') >= 0) return true;
+          // 全局同步会把文案改成「退出绑定」，那时只能靠 onclick 认出来
+          return /openScan/.test(b.getAttribute('onclick') || '');
+        });
+        qrBtns.forEach(function (b) {
+          b.setAttribute('data-lyx-qr', 'bili');
+          b.removeAttribute('onclick'); // 掀掉原型里 openScan(...)（它不认平台，一律弹 QQ 的码）
+          b.textContent = '扫码绑定';
+        });
+        const qrBtn = qrBtns[0] || null;
+        // 微信卡片还没做（M6）：把它的扫码按钮明确禁用，别让人点了以为有反应
+        try {
+          const wxPill = root.querySelector('#st-wx');
+          const wxCard = wxPill ? wxPill.closest('.card') : null;
+          if (wxCard) {
+            Array.prototype.slice.call(wxCard.querySelectorAll('button')).forEach(function (b) {
+              if ((b.textContent || '').indexOf('扫码') < 0) return;
+              b.removeAttribute('onclick');
+              b.textContent = '微信还没接（M6）';
+              b.disabled = true;
+            });
+          }
+        } catch (wxError) {}
         const qrLine = biliCard.querySelector('[data-lyx-qr-status]') || document.createElement('div');
         if (!qrLine.parentNode) {
           qrLine.className = 'small';
@@ -451,9 +469,10 @@ window.__ModuleLoader__.load({
           if (qrTimer) { clearTimeout(qrTimer); qrTimer = null; }
         }
         function qrIdle() {
-          if (!qrBtn) return;
-          qrBtn.disabled = false;
-          qrBtn.textContent = '扫码绑定';
+          qrBtns.forEach(function (b) { b.disabled = false; b.textContent = '扫码绑定'; });
+        }
+        function qrBusy(text) {
+          qrBtns.forEach(function (b) { b.disabled = true; b.textContent = text; });
         }
         function qrEnd(text) {
           qrStop();
@@ -500,20 +519,18 @@ window.__ModuleLoader__.load({
           }, QR_POLL_MS);
         }
         if (qrBtn) {
-          qrBtn.onclick = function () {
+          const startQr = function () {
             if (qrActive) return;
             qrActive = true;
             qrStopped = false;
-            qrBtn.disabled = true;
-            qrBtn.textContent = '生成中…';
+            qrBusy('生成中…');
             qrSay('正在向 B 站要一张登录二维码…');
             fetch('/lanyuxi/bili/qr', { cache: 'no-store' })
               .then(function (r) { return r.json().catch(function () { return { ok: false, error: '接口返回 ' + r.status }; }); })
               .then(function (d) {
                 if (dead) { qrEnd(); return; }
                 if (!d || d.ok !== true || !d.url) throw new Error((d && d.error) || '没拿到二维码');
-                qrBtn.disabled = false;
-                qrBtn.textContent = '等待扫码…';
+                qrBusy('等待扫码…');
                 if (d.sentToQQ === false) {
                   const a = document.createElement('a');
                   a.href = String(d.url);
@@ -533,6 +550,7 @@ window.__ModuleLoader__.load({
                 lyxToast('扫码没跑通：' + why);
               });
           };
+          qrBtns.forEach(function (b) { b.onclick = startQr; });
         }
         function paint(d) {
           if (dead || !d) return;
