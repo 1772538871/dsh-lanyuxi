@@ -217,6 +217,46 @@ export function apply(ctx, rawConfig) {
       if (!config.allowGroups.includes(groupId)) { diag.droppedGroup += 1; return }
     } else if (messageType === "private") {
       if (config.ownerQq && userId !== config.ownerQq) { diag.droppedPrivate += 1; return }
+      // 不依赖面板的登录入口：主人在 QQ 里发「B站登录」，把链接发给他，并后台盯着结果
+      if (/^(b站|bilibili)?登录$/i.test(text.trim()) || /^登录(b站|bilibili)$/i.test(text.trim())) {
+        const say = async (msg) => {
+          try {
+            await dispatchOutbound({
+              type: "private",
+              id: config.ownerQq,
+              chatKey: "private:" + config.ownerQq,
+              parts: [{ type: "text", data: { text: msg } }],
+              text: msg,
+            })
+          } catch (error) { diag.biliQrSendError = String(error) }
+        }
+        try {
+          const q = await biliQrGenerate()
+          await say("【B站登录】" + q.url + "\n（用手机点开这个链接确认登录，约 3 分钟有效。我在后台盯着，登上就回你。）")
+          appendTranscript(ownerLabel(), text)
+          appendTranscript("蓝余汐", "【B站登录】已把登录链接发过去")
+          ;(async () => {
+            for (let i = 0; i < 90; i += 1) {
+              await new Promise((r) => setTimeout(r, 2000))
+              let st = null
+              try { st = await biliQrPoll() } catch (error) { diag.biliQrError = String(error); return }
+              if (!st) return
+              if (st.status === "ok") {
+                await say("登上了：" + (st.profile?.name || "已登录") + "（UID " + (st.profile?.uid || "?") + "）")
+                return
+              }
+              if (st.status === "expired" || st.status === "error") {
+                await say("这次没登上（" + (st.message || st.status) + "），再说一次「B站登录」我给你新的链接。")
+                return
+              }
+            }
+            await say("3 分钟到了还没确认，你再说一次「B站登录」我给你新链接。")
+          })()
+        } catch (error) {
+          await say("拿登录链接失败：" + String(error?.message || error))
+        }
+        return
+      }
       // QQ 审批桥：主人对「要你定一下」的回答，先吃掉，别当成普通聊天（也就不会去打断她的判断）
       if (pendingApproval) {
         const t = text.trim()
