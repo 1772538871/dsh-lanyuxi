@@ -3113,6 +3113,15 @@ export function apply(ctx, rawConfig) {
             if (!existsSync(qrPath)) return send(404, { error: "还没有二维码（NapCat 可能没在跑）" })
             const age = Date.now() - statSync(qrPath).mtimeMs
             if (age > 5 * 60 * 1000) return send(409, { error: "二维码已过期（NapCat 没在跑）", ageMs: age })
+            // 文件新鲜 ≠ 码能扫：NapCat 的 WS 没在监听说明它没真正跑起来，图多半是上一次留下的
+            const endpoint = readNapcatEndpoint(config.napcatDir) || {}
+            const wsUp = await portOpen(endpoint.port ?? 3001)
+            if (!wsUp) {
+              return send(409, {
+                error: "NapCat 没在监听 " + (endpoint.port ?? 3001) + "（WS 没起来），这张二维码多半是旧图；先启动/重启 NapCat 再扫",
+                ageMs: age,
+              })
+            }
             const buf = readFileSync(qrPath)
             res.setHeader("x-qr-mtime", String(statSync(qrPath).mtimeMs))
             return send(200, buf, "image/png")
