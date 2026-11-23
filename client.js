@@ -498,24 +498,31 @@ window.__ModuleLoader__.load({
             }
             // NapCat 是插件在后台拉起来的，token 在它自己的 webui.json 里，主人看不到——
             // 这里给一条"已经带上 token"的直达链接，省得他去找配置文件。
-            if (inner && !inner.querySelector('[data-lyx-wui]')) {
+            if (inner) {
               fetch('/lanyuxi/webui', { cache: 'no-store' })
                 .then(function (r) { return r.ok ? r.json() : null; })
                 .then(function (d) {
                   if (!d || !d.url || !inner) return;
-                  const line = document.createElement('div');
-                  line.className = 'small';
-                  line.setAttribute('data-lyx-wui', '1');
-                  line.style.cssText = 'margin:6px 0 0';
-                  const a = document.createElement('a');
-                  a.href = String(d.url);
-                  a.target = '_blank';
-                  a.rel = 'noopener';
-                  a.textContent = '点这里带 token 打开 NapCat 面板（不用去翻 webui.json）';
-                  line.appendChild(a);
-                  const napcatRow = inner.querySelector('#napcat-qq');
-                  if (napcatRow && napcatRow.parentNode) napcatRow.parentNode.insertBefore(line, napcatRow.nextSibling);
-                  else inner.appendChild(line);
+                  const row = inner.querySelector('#napcat-qq');
+                  if (!row) return;
+                  // 地址栏直接显示"带 token 的那一条"，打开按钮也用它——不用再额外加一行链接
+                  const mono = row.querySelector('.mono2');
+                  if (mono) {
+                    mono.textContent = String(d.url);
+                    mono.title = String(d.url);
+                    mono.style.whiteSpace = 'nowrap';
+                    mono.style.overflow = 'hidden';
+                    mono.style.textOverflow = 'ellipsis';
+                  }
+                  Array.prototype.slice.call(row.querySelectorAll('button')).forEach(function (b) {
+                    if ((b.textContent || '').indexOf('打开') < 0) return;
+                    b.onclick = function (ev) {
+                      if (ev && ev.preventDefault) ev.preventDefault();
+                      window.open(String(d.url), '_blank', 'noopener');
+                    };
+                  });
+                  const oldLine = inner.querySelector('[data-lyx-wui]');
+                  if (oldLine && oldLine.parentNode) oldLine.parentNode.removeChild(oldLine);
                 })
                 .catch(function () {});
             }
