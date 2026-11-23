@@ -670,10 +670,21 @@ window.__ModuleLoader__.load({
         const scope = document.querySelector('.lyx-scope');
         if (!scope) return;
         let dead = false;
+        // 按卡片标题认平台：原型复制出来的卡片有的带 id、有的没有，不能只认 id
+        function kindOf(card) {
+          const t = (card.textContent || '').slice(0, 120);
+          if (/B\s*站|bilibili/i.test(t)) return 'bili';
+          if (/微信|wechat/i.test(t)) return 'wx';
+          if (/QQ/.test(t)) return 'qq';
+          return '';
+        }
         function paintOne(id, info) {
-          Array.prototype.slice.call(scope.querySelectorAll('#' + id)).forEach(function (pill) {
-            const card = pill.closest('.card');
-            if (!card) return;
+          const byId = Array.prototype.slice.call(scope.querySelectorAll('#' + id));
+          const byKind = Array.prototype.slice.call(scope.querySelectorAll('.card')).filter(function (c) { return kindOf(c) === id.replace('st-', ''); });
+          const cards = byId.map(function (p) { return p.closest('.card'); }).concat(byKind);
+          cards.filter(Boolean).forEach(function (card) {
+            const pill = card.querySelector('.pill');
+            if (!pill) return;
             const ok = Boolean(info.ok);
             pill.className = 'pill ' + (ok ? 'ok' : 'off');
             pill.textContent = ok ? (info.pill || '已登录') : '未接入';
@@ -707,7 +718,14 @@ window.__ModuleLoader__.load({
         Promise.all([
           fetch('/lanyuxi/overview', { cache: 'no-store' }).then(function (r) { return r.json(); }).catch(function () { return null; }),
           fetch('/lanyuxi/bili', { cache: 'no-store' }).then(function (r) { return r.json(); }).catch(function () { return null; }),
-        ]).then(function (res) { if (!dead) paintCards(res[0], res[1]); });
+        ]).then(function (res) {
+          if (dead) return;
+          paintCards(res[0], res[1]);
+          try {
+            const n = Array.prototype.slice.call(scope.querySelectorAll('.card')).filter(function (c) { return Boolean(kindOf(c)); }).length;
+            console.info('[lanyuxi] 平台卡片刷新：' + n + ' 张（QQ/B站/微信都按真实登录态显示）');
+          } catch (e) {}
+        });
         return function () { dead = true; };
       }, [tab]);
 
