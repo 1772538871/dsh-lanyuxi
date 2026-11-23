@@ -496,6 +496,29 @@ window.__ModuleLoader__.load({
                 if (el && !inner.contains(el)) inner.appendChild(el);
               });
             }
+            // NapCat 是插件在后台拉起来的，token 在它自己的 webui.json 里，主人看不到——
+            // 这里给一条"已经带上 token"的直达链接，省得他去找配置文件。
+            if (inner && !inner.querySelector('[data-lyx-wui]')) {
+              fetch('/lanyuxi/webui', { cache: 'no-store' })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (d) {
+                  if (!d || !d.url || !inner) return;
+                  const line = document.createElement('div');
+                  line.className = 'small';
+                  line.setAttribute('data-lyx-wui', '1');
+                  line.style.cssText = 'margin:6px 0 0';
+                  const a = document.createElement('a');
+                  a.href = String(d.url);
+                  a.target = '_blank';
+                  a.rel = 'noopener';
+                  a.textContent = '点这里带 token 打开 NapCat 面板（不用去翻 webui.json）';
+                  line.appendChild(a);
+                  const napcatRow = inner.querySelector('#napcat-qq');
+                  if (napcatRow && napcatRow.parentNode) napcatRow.parentNode.insertBefore(line, napcatRow.nextSibling);
+                  else inner.appendChild(line);
+                })
+                .catch(function () {});
+            }
             // 会话切换那一行挤成两行了：强制不换行，并让下拉自己收缩
             const segRow = qqCard.querySelector('#seg-roll');
             if (segRow) {
