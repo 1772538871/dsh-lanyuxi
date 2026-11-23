@@ -2315,13 +2315,35 @@ export function apply(ctx, rawConfig) {
     return endpoint ? endpoint.port : 3001
   }
 
+  /** NapCat 的 webui 端口（从它自己的 webui.json 读，读不到就用 6100） */
+  function napcatWebuiPort() {
+    try {
+      const cfg = JSON.parse(readFileSync(join(config.napcatDir, "napcat", "config", "webui.json"), "utf8"))
+      const p = Number(cfg && cfg.port)
+      if (Number.isFinite(p) && p > 0) return p
+    } catch {}
+    return 6100
+  }
+  let napcatLastSpawnAt = 0
+
   async function startNapcat() {
     if (napcatStarting) return { ok: false, already: true, error: "上一次启动还在等结果，别连点" }
     const bat = join(config.napcatDir, "napcat.bat")
     if (!existsSync(bat)) return { ok: false, error: "找不到 " + bat }
     const port = napcatPort()
     if (await portOpen(port)) return { ok: true, already: true, port }
+    // 关键：没登录成功时 OneBot 的 3001 本来就不会开。只看 3001 会以为"没启动"，
+    // 于是每几秒就再拉一个 NapCat —— QQ 那边会把这当成异常登录行为（"账号密码异常"）。
+    // 所以只要它的 webui 端口在监听，就认定"已经在跑"，绝不再拉起新实例。
+    if (await portOpen(napcatWebuiPort())) {
+      return { ok: true, already: true, port: napcatWebuiPort(), note: "NapCat 已在运行（webui 通），请直接在它的面板里完成登录" }
+    }
+    // 兜底冷却：60 秒内最多拉起一次，避免反复拉起把 QQ 风控引起来
+    if (napcatLastSpawnAt && Date.now() - napcatLastSpawnAt < 60000) {
+      return { ok: false, already: true, error: "刚拉过一次（" + Math.round((Date.now() - napcatLastSpawnAt) / 1000) + " 秒前），等一会儿再试，别连点" }
+    }
     napcatStarting = true
+    napcatLastSpawnAt = Date.now()
     try {
       const nodeExe = join(config.napcatDir, "node.exe")
       const entry = join(config.napcatDir, "index.js")
