@@ -432,6 +432,45 @@ window.__ModuleLoader__.load({
           b.textContent = '扫码绑定';
         });
         const qrBtn = qrBtns[0] || null;
+        // —— QQ 卡片：扫码登录同样放最上面（和 B 站一致）；NapCat 面板 + 会话切换收进折叠 ——
+        try {
+          const qqPill = root.querySelector('#st-qq');
+          const qqCard = qqPill ? qqPill.closest('.card') : null;
+          if (qqCard) {
+            let qqRow = qqCard.querySelector('#lyx-qq-login');
+            if (!qqRow) {
+              qqRow = document.createElement('div');
+              qqRow.id = 'lyx-qq-login';
+              qqRow.className = 'lyx-roll';
+              qqRow.style.cssText = 'margin:10px 0 0;align-items:center';
+              const l = document.createElement('span');
+              l.className = 'lbl';
+              l.style.cssText = 'margin-right:auto';
+              l.textContent = '扫码登录';
+              qqRow.appendChild(l);
+              const vr = qqCard.querySelector('.verify');
+              if (vr && vr.parentNode) vr.parentNode.insertBefore(qqRow, vr);
+              else qqCard.appendChild(qqRow);
+            }
+            const qqScanBtns = Array.prototype.slice.call(qqCard.querySelectorAll('button')).filter(function (b) {
+              return !qqRow.contains(b) && (b.textContent || '').indexOf('扫码') >= 0;
+            });
+            if (qqScanBtns.length) {
+              qqRow.appendChild(qqScanBtns[0]);
+              qqScanBtns[0].textContent = '扫码绑定';
+              qqScanBtns[0].className = 'btn primary';
+            }
+            qqScanBtns.slice(1).forEach(function (b) { b.style.display = 'none'; });
+            const det = qqCard.querySelector('details');
+            const inner = det ? (det.querySelector('.inner') || det) : null;
+            if (inner) {
+              ['#napcat-qq', '#seg-roll', '#seg-tip'].forEach(function (sel) {
+                const el = qqCard.querySelector(sel);
+                if (el && !inner.contains(el)) inner.appendChild(el);
+              });
+            }
+          }
+        } catch (qqError) {}
         // 扫码登录要排在「测试收发」前面（先扫码再测试），凭据仍留在最下面的折叠里
         let loginRow = biliCard.querySelector('#lyx-bili-login');
         if (!loginRow) {
