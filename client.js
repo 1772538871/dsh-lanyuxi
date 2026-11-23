@@ -469,6 +469,18 @@ window.__ModuleLoader__.load({
                 if (el && !inner.contains(el)) inner.appendChild(el);
               });
             }
+            // 会话切换那一行挤成两行了：强制不换行，并让下拉自己收缩
+            const segRow = qqCard.querySelector('#seg-roll');
+            if (segRow) {
+              segRow.style.flexWrap = 'nowrap';
+              segRow.style.alignItems = 'center';
+              const segNow = segRow.querySelector('#seg-now');
+              if (segNow) segNow.style.display = 'none';   // 下拉里本来就写着当前是哪一段，不必重复
+              const segPick = segRow.querySelector('#seg-pick');
+              if (segPick) { segPick.style.flex = '1 1 auto'; segPick.style.minWidth = '0'; }
+              const segGo = segRow.querySelector('#seg-go');
+              if (segGo) segGo.style.flex = '0 0 auto';
+            }
           }
         } catch (qqError) {}
         // 扫码登录要排在「测试收发」前面（先扫码再测试），凭据仍留在最下面的折叠里
