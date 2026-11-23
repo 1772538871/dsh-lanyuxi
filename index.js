@@ -2382,6 +2382,16 @@ export function apply(ctx, rawConfig) {
     }
   }
 
+  /** 主人定的规矩：DSH 一启动就把 NapCat 关掉，绝不残留；只有点「扫码绑定」时才重新拉起。 */
+  function shutdownNapcatOnBoot(reason) {
+    setTimeout(function () {
+      stopNapcat().then(function (r) {
+        if (r && r.ok) logger.info?.("[lanyuxi] 启动时已关闭 NapCat（" + reason + "）")
+        else logger.info?.("[lanyuxi] 启动时关闭 NapCat 未成功：" + ((r && r.error) || "未知原因"))
+      }).catch(function (error) { logger.warn?.("[lanyuxi] 启动时关闭 NapCat 出错：" + String(error)) })
+    }, 1500)
+  }
+
   async function stopNapcat() {
     try {
       const pattern = config.napcatDir.replace(/'/g, "''")
@@ -2389,6 +2399,8 @@ export function apply(ctx, rawConfig) {
       const script = [
         "$pids = @()",
         "try { $pids += (Get-NetTCPConnection -LocalPort " + port + " -State Listen -ErrorAction SilentlyContinue).OwningProcess } catch {}",
+        "try { $pids += (Get-NetTCPConnection -LocalPort " + napcatWebuiPort() + " -State Listen -ErrorAction SilentlyContinue).OwningProcess } catch {}",
+        "try { $pids += (Get-CimInstance Win32_Process -Filter \"Name='QQ.exe'\" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like '*napcat*' }).ProcessId } catch {}",
         "try { $pids += (Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like '*" + pattern + "*' }).ProcessId } catch {}",
         "try { $pids += (Get-CimInstance Win32_Process -Filter \"Name='NapCatWinBootMain.exe'\" -ErrorAction SilentlyContinue).ProcessId } catch {}",
         "$pids = $pids | Where-Object { $_ } | Sort-Object -Unique",
@@ -3152,6 +3164,8 @@ export function apply(ctx, rawConfig) {
         },
       })
       routeRegistered = true
+      // 主人定的规矩：DSH 一重启就把 NapCat 关掉，直到下一次点「扫码绑定」才重新拉起
+      shutdownNapcatOnBoot("DSH 启动")
       return dispose
     }, "lanyuxi: 面板接口")
   })
