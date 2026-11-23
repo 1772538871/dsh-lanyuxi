@@ -538,6 +538,37 @@ window.__ModuleLoader__.load({
                       window.open(String(d.url), '_blank', 'noopener');
                     };
                   });
+                  // token 必须能看见：NapCat 的 WebUI 不认 URL 参数，只认登录框里粘进去的这串
+                  if (!inner.querySelector('[data-lyx-token]') && d.token) {
+                    const line = document.createElement('div');
+                    line.className = 'small';
+                    line.setAttribute('data-lyx-token', '1');
+                    line.style.cssText = 'margin:6px 0 0;display:flex;align-items:center;gap:8px;flex-wrap:wrap';
+                    const label = document.createElement('span');
+                    label.textContent = '登录 token：';
+                    const code = document.createElement('code');
+                    code.className = 'mono2';
+                    code.textContent = String(d.token);
+                    code.style.cssText = 'user-select:all;padding:2px 6px;border-radius:6px;background:rgba(91,140,255,.12)';
+                    const copy = document.createElement('button');
+                    copy.className = 'btn ghost';
+                    copy.style.cssText = 'padding:3px 9px;font-size:12px';
+                    copy.textContent = '复制';
+                    copy.onclick = function () {
+                      const t = String(d.token);
+                      if (navigator.clipboard && navigator.clipboard.writeText) {
+                        navigator.clipboard.writeText(t).then(function () { lyxToast('token 已复制'); }, function () { lyxToast('复制失败，手动选中复制'); });
+                      } else {
+                        lyxToast('浏览器不给剪贴板权限，手动选中复制：' + t);
+                      }
+                    };
+                    line.appendChild(label);
+                    line.appendChild(code);
+                    line.appendChild(copy);
+                    const row2 = inner.querySelector('#napcat-qq');
+                    if (row2 && row2.parentNode) row2.parentNode.insertBefore(line, row2.nextSibling);
+                    else inner.appendChild(line);
+                  }
                   const oldLine = inner.querySelector('[data-lyx-wui]');
                   if (oldLine && oldLine.parentNode) oldLine.parentNode.removeChild(oldLine);
                 })

@@ -3140,7 +3140,9 @@ export function apply(ctx, rawConfig) {
           const base = (config.napcatPanel || "http://127.0.0.1:6100").replace(/\/+$/, "")
           const url = token ? (base + "/webui?token=" + encodeURIComponent(token)) : (base + "/webui")
           // 不再回 token 字段：面板只用 url，别的地方也不需要看见它
-          return send(200, { url })
+          // 注意：NapCat 的 WebUI **不认 URL 上的 token**（只认登录框里粘进去的），
+          // 所以把 token 一并返回，让面板显示出来方便复制。
+          return send(200, { url, token })
         }
         if (url.pathname === "/lanyuxi/qr") {
           try {
