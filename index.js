@@ -3114,14 +3114,11 @@ export function apply(ctx, rawConfig) {
             const age = Date.now() - statSync(qrPath).mtimeMs
             if (age > 5 * 60 * 1000) return send(409, { error: "二维码已过期（NapCat 没在跑）", ageMs: age })
             // 文件新鲜 ≠ 码能扫：NapCat 的 WS 没在监听说明它没真正跑起来，图多半是上一次留下的
+            // 注意：没登录成功时 OneBot 的 WS 本来就不会监听——不能拿它当"码是旧的"判据，
+            // 那样会把首次扫码登录这条正路堵死。只把状态放进响应头，供面板提示。
             const endpoint = readNapcatEndpoint(config.napcatDir) || {}
             const wsUp = await portOpen(endpoint.port ?? 3001)
-            if (!wsUp) {
-              return send(409, {
-                error: "NapCat 没在监听 " + (endpoint.port ?? 3001) + "（WS 没起来），这张二维码多半是旧图；先启动/重启 NapCat 再扫",
-                ageMs: age,
-              })
-            }
+            res.setHeader("x-ws-up", wsUp ? "1" : "0")
             const buf = readFileSync(qrPath)
             res.setHeader("x-qr-mtime", String(statSync(qrPath).mtimeMs))
             return send(200, buf, "image/png")
