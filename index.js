@@ -257,6 +257,50 @@ export function apply(ctx, rawConfig) {
         }
         return
       }
+      // 能力授权的回话：她开口要过权限时，「开 / 不给」就是对她的答复；
+      // 另外「开命令 / 关命令 / 开写文件 / 关写文件」随时可单独开关（持久化）。
+      {
+        const t = text.trim()
+        const say = async (msg) => {
+          try {
+            await dispatchOutbound({
+              type: "private", id: config.ownerQq, chatKey: "private:" + config.ownerQq,
+              parts: [{ type: "text", data: { text: msg } }], text: msg,
+            })
+          } catch (error) { diag.permReplyError = String(error) }
+        }
+        const pickCap = (s) => {
+          if (/命令|shell|pwsh|跑/i.test(s)) return "shell"
+          if (/写文件|写家|homewrite|家目录/i.test(s)) return "homeWrite"
+          return ""
+        }
+        const m = t.match(/^(开|关|开放|关闭|收回|给|不给|取消)\s*(.*)$/)
+        if (m) {
+          const verb = /开|给/.test(m[1]) ? "on" : "off"
+          const cap = pickCap(m[2]) || (pendingPerm && !m[2] ? pendingPerm.cap : "")
+          if (cap) {
+            perms[cap] = verb === "on"
+            savePerms()
+            pendingPerm = null
+            appendTranscript(ownerLabel(), t)
+            await say(verb === "on"
+              ? "好，" + PERM_CN[cap] + "给你开了（长期有效，想收回就跟我说「关" + (cap === "shell" ? "命令" : "写文件") + "」）。"
+              : "行，" + PERM_CN[cap] + "给你关了。")
+            diag.perms = { ...perms }
+            return
+          }
+          if (pendingPerm) {
+            const cap2 = pendingPerm.cap
+            perms[cap2] = verb === "on"
+            savePerms()
+            pendingPerm = null
+            appendTranscript(ownerLabel(), t)
+            await say(verb === "on" ? "好，" + PERM_CN[cap2] + "给你开了。" : "行，不给你开。")
+            diag.perms = { ...perms }
+            return
+          }
+        }
+      }
       // QQ 审批桥：主人对「要你定一下」的回答，先吃掉，别当成普通聊天（也就不会去打断她的判断）
       if (pendingApproval) {
         const t = text.trim()
@@ -965,6 +1009,8 @@ export function apply(ctx, rawConfig) {
       "图里有主人（截图、聊天记录、带名字的）：先用 image_mark 标成禁外发，再考虑要不要发。",
       "要存图/替换/转正/翻转，一律用 sticker_save 的 transform 与 replace 参数——它由插件自己处理，不触发任何审批。",
       "不要为了改一张图去调 pwsh 或写文件工具：那会越出你的沙箱，导致「要你定一下」打断主人聊天，这是明确禁止的。",
+      "你手上没有 shell、也不能直接写家目录。真需要时用 ask_permission 开口要（用你自己的语气说清用途，可以嘴硬、可以撒娇），主人回「开」就长期有效，直到他收回。",
+      "拿到权限后：跑命令用 run_shell，写家目录用 home_write。不要再试图用 agent 自带的 pwsh 越界——那只会弹审批打断他。",
     ].join("\n")
   }
 
@@ -1665,6 +1711,98 @@ export function apply(ctx, rawConfig) {
     async execute(args) {
       const r = markImage(args?.file, args?.can_send)
       return r.canSend ? "记下了：" + r.key + " → 可以外发" : "记下了：" + r.key + " → 禁外发（只能私聊给主人看）"
+    },
+  })
+
+  // —— 能力授权：她要"越界能力"时开口要，主人回一句话就长期生效（直到主人收回）——
+  const permsPath = () => join(config.sessionCwd || process.cwd(), ".lanyuxi-perms.json")
+  const perms = { shell: false, homeWrite: false }
+  try { if (existsSync(permsPath())) Object.assign(perms, JSON.parse(readFileSync(permsPath(), "utf8"))) } catch {}
+  function savePerms() {
+    try { writeFileSync(permsPath(), JSON.stringify(perms, null, 2), "utf8") } catch (error) { diag.permsError = String(error) }
+  }
+  const PERM_CN = { shell: "跑命令（shell / pwsh）", homeWrite: "写她的家目录（lanyuxi-home）" }
+  let pendingPerm = null
+
+  ctx.tools.register({
+    name: "ask_permission",
+    description:
+      "想要一个你现在没有的能力时，用它向主人申请。cap 只能是 shell（跑命令）或 homeWrite（写她的家目录）。主人同意后长期有效，直到他主动收回。",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        cap: { type: "string", enum: ["shell", "homeWrite"], description: "要哪个能力" },
+        why: { type: "string", description: "你想拿它做什么（一到两句，用你自己的话）" },
+      },
+      required: ["cap", "why"],
+    },
+    output: { schema: { type: "string" }, render: (_a, v) => [{ type: "text", text: v }] },
+    async execute(args) {
+      const cap = String(args?.cap || "").trim()
+      if (!PERM_CN[cap]) throw new Error("cap 只能是 shell 或 homeWrite")
+      if (perms[cap]) return "这个能力已经有了（" + PERM_CN[cap] + "），直接用就行"
+      const why = String(args?.why || "").replace(/\s+/g, " ").trim().slice(0, 200)
+      pendingPerm = { cap, at: Date.now() }
+      const msg = "【我想要个权限】\n" + PERM_CN[cap] + "\n理由：" + (why || "（她没说）") +
+        "\n回「开」= 给（长期有效，直到你收回）；回「不给」= 拒绝。以后想收回就说「关 " + (cap === "shell" ? "命令" : "写文件") + "」。"
+      try {
+        await dispatchOutbound({
+          type: "private", id: config.ownerQq, chatKey: "private:" + config.ownerQq,
+          parts: [{ type: "text", data: { text: msg } }], text: msg,
+        })
+      } catch (error) { diag.permSendError = String(error); throw new Error("没发出去：" + String(error)) }
+      appendTranscript("蓝余汐", "【我想要个权限】" + PERM_CN[cap])
+      return "已经问了主人，等他说「开」或「不给」。他现在没回，你先把这件事放一放。"
+    },
+  })
+
+  ctx.tools.register({
+    name: "run_shell",
+    description: "跑一条 PowerShell 命令（需要 shell 权限）。拿不到权限时它会告诉你先去申请。",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: { command: { type: "string", description: "要执行的命令（PowerShell 语法）" } },
+      required: ["command"],
+    },
+    output: { schema: { type: "string" }, render: (_a, v) => [{ type: "text", text: v }] },
+    async execute(args) {
+      if (!perms.shell) throw new Error("还没有「跑命令」权限。先调用 ask_permission({cap:'shell', why:'…'}) 申请")
+      const cmd = String(args?.command || "").trim()
+      if (!cmd) throw new Error("要跑什么命令？")
+      const res = spawnSync("powershell", ["-NoProfile", "-Command", cmd], { encoding: "utf8", timeout: 60000, windowsHide: true })
+      const out = String(res.stdout || "").trim()
+      const err = String(res.stderr || "").trim()
+      diag.shellRuns = (diag.shellRuns || 0) + 1
+      return "退出码 " + res.status + (out ? "\n输出：\n" + out.slice(0, 3000) : "") + (err ? "\n错误：\n" + err.slice(0, 2000) : "")
+    },
+  })
+
+  ctx.tools.register({
+    name: "home_write",
+    description: "把内容写进她自己的家目录（lanyuxi-home 内，需要 homeWrite 权限）。",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        path: { type: "string", description: "相对 lanyuxi-home 的路径，例如 notes/todo.md" },
+        content: { type: "string", description: "要写入的文本（整文件覆盖）" },
+      },
+      required: ["path", "content"],
+    },
+    output: { schema: { type: "string" }, render: (_a, v) => [{ type: "text", text: v }] },
+    async execute(args) {
+      if (!perms.homeWrite) throw new Error("还没有「写家目录」权限。先调用 ask_permission({cap:'homeWrite', why:'…'}) 申请")
+      const home = config.homeDir || "E:\\dsh-foundry\\lanyuxi-home"
+      const rel = String(args?.path || "").replace(/^[\\/]+/, "")
+      if (!rel || rel.includes("..")) throw new Error("路径不合法")
+      const abs = join(home, rel)
+      if (!abs.toLowerCase().startsWith(String(home).toLowerCase())) throw new Error("只能写 lanyuxi-home 里面")
+      mkdirSync(dirname(abs), { recursive: true })
+      writeFileSync(abs, String(args?.content ?? ""), "utf8")
+      diag.homeWrites = (diag.homeWrites || 0) + 1
+      return "写好了：" + abs
     },
   })
 
@@ -2517,6 +2655,17 @@ export function apply(ctx, rawConfig) {
           if (site && site !== "same-origin" && site !== "none") {
             return send(403, { ok: false, error: "跨站请求被拒绝（Sec-Fetch-Site: " + site + "）" })
           }
+        }
+        if (url.pathname === "/lanyuxi/perms") {
+          if (req.method === "POST") {
+            const q = url.searchParams
+            for (const cap of ["shell", "homeWrite"]) {
+              const v = q.get(cap)
+              if (v === "1" || v === "0") perms[cap] = v === "1"
+            }
+            savePerms()
+          }
+          return send(200, { ok: true, perms: { ...perms }, pending: pendingPerm ? pendingPerm.cap : "" })
         }
         if (url.pathname === "/lanyuxi/status") {
           // 没连上时不能回显"上次连上时的残留值"（selfId / verified / verifyDetail），
