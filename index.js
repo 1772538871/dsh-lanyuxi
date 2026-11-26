@@ -2477,7 +2477,24 @@ export function apply(ctx, rawConfig) {
           // 没连上时不能回显"上次连上时的残留值"（selfId / verified / verifyDetail），
           // 否则界面会显示成"连上了"，排查时把人往错方向带。
           const ws = connected
+          // 扫码确认后 NapCat 会立刻起 3001，但插件原本要等 10~30 秒退避才重连，
+          // 于是"手机上已经登上了、面板还显示未接入"。这里主动探一次端口：一开就立刻重连。
+          let reconnecting = false
+          if (!ws) {
+            try {
+              const endpoint = readNapcatEndpoint(config.napcatDir) || {}
+              const up = await portOpen(endpoint.port ?? 3001, "127.0.0.1", 400)
+              const idle = !socket || socket.readyState === 3
+              if (up && idle) {
+                clearTimeout(reconnectTimer)
+                backoff = 1000
+                connect()
+                reconnecting = true
+              }
+            } catch (error) { diag.reconnectError = String(error) }
+          }
           return send(200, {
+            reconnecting,
             connected: ws,
             verified: ws ? verified : false,
             verifyDetail: ws ? verifyDetail : "",

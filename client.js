@@ -140,7 +140,16 @@ window.__ModuleLoader__.load({
           fetch('/lanyuxi/status', { cache: 'no-store' })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (s) {
-              if (stopped || !s || !s.connected) return;
+              if (stopped || !s) return;
+              if (!s.connected && s.reconnecting) {
+                setScan(function (prev) {
+                  if (!prev || prev.done) return prev;
+                  if (prev.status === 'NapCat 已登录，正在建立连接…') return prev;
+                  return { open: true, done: false, qr: null, confirmed: true, expiresAt: prev.expiresAt, status: 'NapCat 已登录，正在建立连接…' };
+                });
+                return;
+              }
+              if (!s.connected) return;
               stopped = true;
               clearInterval(t);
               setScan({ open: true, done: true, qr: null, status: '登录成功 · 已连接 ' + (s.selfId || '') });
