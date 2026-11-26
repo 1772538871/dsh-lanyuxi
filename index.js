@@ -2474,7 +2474,20 @@ export function apply(ctx, rawConfig) {
           }
         }
         if (url.pathname === "/lanyuxi/status") {
-          return send(200, { connected, verified, verifyDetail, selfId, todaySent: quota.count, lastChat: lastChat?.chatKey ?? null, allowGroups: config.allowGroups, panel: config.napcatPanel })
+          // 没连上时不能回显"上次连上时的残留值"（selfId / verified / verifyDetail），
+          // 否则界面会显示成"连上了"，排查时把人往错方向带。
+          const ws = connected
+          return send(200, {
+            connected: ws,
+            verified: ws ? verified : false,
+            verifyDetail: ws ? verifyDetail : "",
+            selfId: ws ? selfId : "",
+            lastSelfId: ws ? "" : selfId,   // 残留值单独放这里，只做参考，不参与任何判断
+            todaySent: quota.count,
+            lastChat: lastChat?.chatKey ?? null,
+            allowGroups: config.allowGroups,
+            panel: config.napcatPanel,
+          })
         }
         if (url.pathname === "/lanyuxi/start") {
           const result = await startNapcat()
