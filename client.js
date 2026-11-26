@@ -133,7 +133,12 @@ window.__ModuleLoader__.load({
       React.useEffect(function () {
         const style = document.createElement('style');
         style.setAttribute('data-lanyuxi', '');
-        style.textContent = '.lyx-scope{' + CSS + '}' + OVERRIDES;
+        style.textContent = '.lyx-scope{' + CSS + '}' + OVERRIDES +
+          // 这两条必须放在全局层：@keyframes 写在 .lyx-scope{…} 里是无效的（CSS 嵌套规则）
+          '.lyx-spin{width:34px;height:34px;border:3px solid rgba(91,140,255,.35);border-top-color:#5b8cff;border-radius:50%;animation:lyxspin .9s linear infinite}' +
+          '@keyframes lyxspin{to{transform:rotate(360deg)}}' +
+          '.lyx-scope .qrbox.loading{background:#0b0e14;border:1px solid rgba(91,140,255,.25)}' +
+          '.lyx-scope .qrbox.clickable{cursor:pointer}';
         document.head.appendChild(style);
 
         /* 原型里的按钮都靠全局函数，这里补上（没接上的就明说） */
@@ -407,7 +412,7 @@ window.__ModuleLoader__.load({
           h('div', { className: 'm-sub' }, '扫这一次就够：登录后账号、WS 端口、token 全部自动写回'),
           h('div', { className: 'qrwrap' },
             h('div', {
-              className: 'qrbox clickable',
+              className: 'qrbox clickable' + (scan.qr && !qrExpired ? '' : ' loading'),
               title: '点一下重新获取二维码',
               onClick: function () { window.dispatchEvent(new CustomEvent('lyx-scan-refresh')); },
             },
