@@ -217,19 +217,9 @@ window.__ModuleLoader__.load({
             return r.json().catch(function () { return {}; }).then(function (j) { return { ok: false, error: (j && j.error) || '', wsDown }; });
           }).then(function (res) {
             if (!res || stopped) return;
-            // 关键：NapCat 的 WS 没在监听时，cache 里那张 qrcode.png 不一定是"当前有效的登录码"，
-            // 拿它给主人扫只会白扫（还会让人以为"扫了没反应"）。这种时候不给码，直接引导去 NapCat 面板。
-            if (res.ok && res.wsDown) {
-              setScan(function (prev) {
-                if (!prev || prev.done) return prev;
-                return {
-                  open: true, done: false, qr: null, wsDown: true,
-                  expiresAt: prev.expiresAt,
-                  status: 'NapCat 还没登录成功（WS 没在监听）。请点下面的「打开 NapCat 面板」用手机扫码登录，成功后这里会自动关掉',
-                };
-              });
-              return;
-            }
+            // 注意：不能因为"WS 没监听"就不给码 —— 登录成功之前 WS 永远是关的，
+            // 那样会把 NapCat 正在展示的有效二维码也一起屏蔽掉（上一版就是这么错的）。
+            // 判据只看两件事：后端有没有给到图（新鲜度由后端按 5 分钟判）。
             if (!res.ok) {
               setScan(function (prev) {
                 if (!prev || prev.done) return prev;
@@ -434,9 +424,7 @@ window.__ModuleLoader__.load({
             qrExpired ? '二维码已失效 —— 点一下上面的二维码重新获取' : scan.status),
           h('div', { className: 'mact' },
             h('button', { className: 'btn', onClick: function () { window.dispatchEvent(new CustomEvent('lyx-scan-close')); } }, '关闭'),
-            scan.wsDown
-              ? h('button', { className: 'btn primary', onClick: function () { window.openNapcat(); } }, '打开 NapCat 面板')
-              : null,
+            h('button', { className: 'btn primary', onClick: function () { window.openNapcat(); } }, '打开 NapCat 面板'),
             scan.done
               ? h('button', { className: 'btn primary', onClick: function () { window.openNapcat(); } }, '打开 NapCat 面板')
               : null))) : null;
