@@ -276,6 +276,20 @@ export function apply(ctx, rawConfig) {
           if (/写文件|写家|homewrite|家目录/i.test(s)) return "homeWrite"
           return ""
         }
+        // 有待处理的申请时：回「给/开/好/行/可以/同意」= 开；其它任何回答 = 不开（主人明确要求的口径）
+        if (pendingPerm) {
+          const cap2 = pendingPerm.cap
+          const yes = /^(给|开|好|行|可以|同意|批准|准|1|ok|y|yes)[！!。.]*$/i.test(t)
+          perms[cap2] = yes
+          savePerms()
+          pendingPerm = null
+          appendTranscript(ownerLabel(), t)
+          await say(yes
+            ? "好，" + PERM_CN[cap2] + "给你开着（想收回就说「关" + (cap2 === "shell" ? "命令" : "写文件") + "」）。"
+            : "行，不给你开。")
+          diag.perms = { ...perms }
+          return
+        }
         const m = t.match(/^(开|关|开放|关闭|收回|给|不给|取消)\s*(.*)$/)
         if (m) {
           const verb = /开|给/.test(m[1]) ? "on" : "off"
@@ -1012,7 +1026,10 @@ export function apply(ctx, rawConfig) {
       "图里有主人（截图、聊天记录、带名字的）：先用 image_mark 标成禁外发，再考虑要不要发。",
       "要存图/替换/转正/翻转，一律用 sticker_save 的 transform 与 replace 参数——它由插件自己处理，不触发任何审批。",
       "不要为了改一张图去调 pwsh 或写文件工具：那会越出你的沙箱，导致「要你定一下」打断主人聊天，这是明确禁止的。",
-      "你手上没有 shell、也不能直接写家目录。真需要时用 ask_permission 开口要（用你自己的语气说清用途，可以嘴硬、可以撒娇），主人回「开」就长期有效，直到他收回。",
+      "你手上没有 shell、也不能直接写家目录。真需要时用 ask_permission 开口要，text 就是你要发给他的原话。",
+      "怎么开口：像平时聊天那样，一两句，说你自己想干什么（比如「我想把这张图收起来」「这图看着顺眼，我想存」），再顺口要权限。",
+      "禁止写成通知/工单：不要「理由：」「回『开』= 允许」这种格式，不要括号补充说明，不要罗列规则。他不会因为你没解释规则就不懂。",
+      "他回「给/开/好」就是同意（长期有效），回别的都是不同意——不同意就换个法子，别磨。",
       "拿到权限后：跑命令用 run_shell，写家目录用 home_write。不要再试图用 agent 自带的 pwsh 越界——那只会弹审批打断他。",
     ].join("\n")
   }
@@ -1736,27 +1753,28 @@ export function apply(ctx, rawConfig) {
       additionalProperties: false,
       properties: {
         cap: { type: "string", enum: ["shell", "homeWrite"], description: "要哪个能力" },
-        why: { type: "string", description: "你想拿它做什么（一到两句，用你自己的话）" },
+        text: { type: "string", description: "你要发给他的原话：用你自己的语气，一到两句，像平时聊天那样开口。不要写「理由：」，不要列规则，不要括号补充说明。" },
       },
-      required: ["cap", "why"],
+      required: ["cap", "text"],
     },
     output: { schema: { type: "string" }, render: (_a, v) => [{ type: "text", text: v }] },
     async execute(args) {
       const cap = String(args?.cap || "").trim()
       if (!PERM_CN[cap]) throw new Error("cap 只能是 shell 或 homeWrite")
       if (perms[cap]) return "这个能力已经有了（" + PERM_CN[cap] + "），直接用就行"
-      const why = String(args?.why || "").replace(/\s+/g, " ").trim().slice(0, 200)
+      // 原样发送她自己写的话：文案里不要出现任何系统腔、规则说明
+      const body = String(args?.text || "").replace(/\s+/g, " ").trim().slice(0, 300)
+      if (!body) throw new Error("先用你自己的话写一句要什么，再调用我")
       pendingPerm = { cap, at: Date.now() }
-      const msg = "【我想要个权限】\n" + PERM_CN[cap] + "\n理由：" + (why || "（她没说）") +
-        "\n回「开」= 给（长期有效，直到你收回）；回「不给」= 拒绝。以后想收回就说「关 " + (cap === "shell" ? "命令" : "写文件") + "」。"
+      const msg = body
       try {
         await dispatchOutbound({
           type: "private", id: config.ownerQq, chatKey: "private:" + config.ownerQq,
           parts: [{ type: "text", data: { text: msg } }], text: msg,
         })
       } catch (error) { diag.permSendError = String(error); throw new Error("没发出去：" + String(error)) }
-      appendTranscript("蓝余汐", "【我想要个权限】" + PERM_CN[cap])
-      return "已经问了主人，等他说「开」或「不给」。他现在没回，你先把这件事放一放。"
+      appendTranscript("蓝余汐", body)
+      return "已经发出去了。他回「给/开/好」就算同意，回别的就是不同意——等他说，别自己先动手。"
     },
   })
 
