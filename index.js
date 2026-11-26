@@ -963,6 +963,8 @@ export function apply(ctx, rawConfig) {
       "一天最多收 2~3 张，只收真的像表情的。群友头像、截图、照片、长图都不算表情——inbox 里的东西一律不收（插件会拒）。",
       "主人说「这张归错了」「这不叫撒娇」时，用 sticker_move 把那一张挪到对的那档、顺便改名。只动这一张，不要批量挪别的。",
       "图里有主人（截图、聊天记录、带名字的）：先用 image_mark 标成禁外发，再考虑要不要发。",
+      "要存图/替换/转正/翻转，一律用 sticker_save 的 transform 与 replace 参数——它由插件自己处理，不触发任何审批。",
+      "不要为了改一张图去调 pwsh 或写文件工具：那会越出你的沙箱，导致「要你定一下」打断主人聊天，这是明确禁止的。",
     ].join("\n")
   }
 
@@ -1677,6 +1679,12 @@ export function apply(ctx, rawConfig) {
         source: { type: "string", description: "要收藏的图片绝对路径，通常是 images 目录下你刚看到的那张。" },
         mood: { type: "string", enum: ["happy", "speechless", "coy", "fierce"], description: "归到哪一档情绪。" },
         name: { type: "string", description: "给它起的短名字（中文可以），会作为文件名。" },
+        transform: {
+          type: "string",
+          enum: ["none", "rotate180", "rotate90", "rotate270", "flipH", "flipV"],
+          description: "顺手把图转正/翻转（例如倒着的图用 rotate180）。插件内部处理，不需要你用 shell 或文件工具。",
+        },
+        replace: { type: "boolean", description: "true = 同名那张直接覆盖（纠正低清版本时用）" },
       },
       required: ["source", "mood", "name"],
     },
@@ -1713,7 +1721,44 @@ export function apply(ctx, rawConfig) {
       const dir = join(home, "stickers", mood)
       mkdirSync(dir, { recursive: true })
       const dest = join(dir, safe + ext)
-      copyFileSync(src, dest)
+      if (existsSync(dest) && !args?.replace) {
+        throw new Error("那边已经有一张同名的：" + safe + ext + "。要覆盖就带上 replace: true，或者换个名字")
+      }
+      // 旋转/翻转：交给插件自己做（Node 没有内置图像库，用 Windows 自带的 System.Drawing）。
+      // 这样她不必用 pwsh 去改文件，也就不会触发"要你定一下"的审批。
+      const transform = String(args?.transform || "none")
+      let source = src
+      if (transform && transform !== "none") {
+        const flipMap = {
+          rotate180: "Rotate180FlipNone",
+          rotate90: "Rotate90FlipNone",
+          rotate270: "Rotate270FlipNone",
+          flipH: "RotateNoneFlipX",
+          flipV: "RotateNoneFlipY",
+        }
+        const mode = flipMap[transform]
+        if (!mode) throw new Error("transform 只支持 none/rotate180/rotate90/rotate270/flipH/flipV")
+        const tmpDir = join(home, "tmp")
+        mkdirSync(tmpDir, { recursive: true })
+        const out = join(tmpDir, "tr-" + Date.now() + (ext === ".jpg" ? ".jpg" : ".png"))
+        const ps1 = join(tmpDir, "tr-" + Date.now() + ".ps1")
+        const fmt = ext === ".jpg" ? "[System.Drawing.Imaging.ImageFormat]::Jpeg" : "[System.Drawing.Imaging.ImageFormat]::Png"
+        writeFileSync(ps1, [
+          "Add-Type -AssemblyName System.Drawing",
+          "$img = [System.Drawing.Image]::FromFile('" + src.replace(/'/g, "''") + "')",
+          "$img.RotateFlip([System.Drawing.RotateFlipType]::" + mode + ")",
+          "$img.Save('" + out.replace(/'/g, "''") + "', " + fmt + ")",
+          "$img.Dispose()",
+        ].join("\n"), "utf8")
+        const res = spawnSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1], { encoding: "utf8", timeout: 20000, windowsHide: true })
+        try { unlinkSync(ps1) } catch {}
+        if (res.error || res.status !== 0 || !existsSync(out)) {
+          throw new Error("转图失败：" + String(res.error?.message || res.stderr || ("退出码 " + res.status)).slice(0, 200))
+        }
+        source = out
+        diag.stickersTransformed = (diag.stickersTransformed || 0) + 1
+      }
+      copyFileSync(source, dest)
       cap.n += 1
       try { writeFileSync(capPath, JSON.stringify(cap), "utf8") } catch {}
       diag.stickersSaved = (diag.stickersSaved || 0) + 1
