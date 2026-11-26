@@ -130,6 +130,28 @@ window.__ModuleLoader__.load({
         return function () { clearInterval(timer); };
       }, [scan]);
 
+      // 弹窗的"自动关闭"单独兜一层：不依赖 alert 里那条轮询，也不依赖 .scan-open 这个 class
+      // （那个 class 是手动加的，React 一重渲染就可能被覆盖掉，导致关了不关的假象）
+      React.useEffect(function () {
+        if (!scan || scan.done) return;
+        let stopped = false;
+        const t = setInterval(function () {
+          if (stopped) return;
+          fetch('/lanyuxi/status', { cache: 'no-store' })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (s) {
+              if (stopped || !s || !s.connected) return;
+              stopped = true;
+              clearInterval(t);
+              setScan({ open: true, done: true, qr: null, status: '登录成功 · 已连接 ' + (s.selfId || '') });
+              lyxToast('已登录 · QQ ' + (s.selfId || ''));
+              setTimeout(function () { window.dispatchEvent(new CustomEvent('lyx-scan-close')); }, 1200);
+            })
+            .catch(function () {});
+        }, 1500);
+        return function () { stopped = true; clearInterval(t); };
+      }, [scan && scan.done, scan && scan.open]);
+
       React.useEffect(function () {
         const style = document.createElement('style');
         style.setAttribute('data-lanyuxi', '');
