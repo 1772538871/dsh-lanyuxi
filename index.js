@@ -211,7 +211,9 @@ export function apply(ctx, rawConfig) {
     }
     let text = segments.filter((s) => s?.type === "text").map((s) => s?.data?.text ?? "").join("").trim()
     if (!text && typeof event.raw_message === "string") text = event.raw_message.replace(/\[CQ:[^\]]*\]/g, "").trim()
-    if (!text) { diag.droppedEmpty += 1; return }
+    const hasImageSeg = segments.some((s) => s?.type === "image")
+    // 注意：纯图片/纯表情消息没有文字，不能在这里丢掉——下面还有"存图 + 告诉她路径"的流程
+    if (!text && !hasImageSeg) { diag.droppedEmpty += 1; return }
 
     if (messageType === "group") {
       if (!config.allowGroups.includes(groupId)) { diag.droppedGroup += 1; return }
@@ -412,6 +414,7 @@ export function apply(ctx, rawConfig) {
         text = (text ? text + "\n" : "") + "（对方发了一张图，但插件没下载下来——你看不到这张图。回答时不要假装看过，更不要用本机信息冒充图里的内容；可以直接说\"图没收到，你再说一遍或者换个方式发\"。）"
       }
     }
+    if (!text) text = "（只发了一张图，没配文字）"
     const chatKey = chatKeyOf(messageType, groupId, userId)
     lastChat = { messageType, groupId, userId, chatKey }
 
