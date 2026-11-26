@@ -1637,6 +1637,67 @@ window.__ModuleLoader__.load({
         const root = document.querySelector('.lyx-scope #view-guard');
         if (!root) return;
         let dead = false;
+
+        // —— 能力开关：后端给清单（cap/label/desc/enabled），这里动态生成，新增能力自动多一个开关 ——
+        function renderPerms(list) {
+          let box = root.querySelector('[data-lyx-perms]');
+          if (!box) {
+            box = document.createElement('div');
+            box.className = 'card';
+            box.setAttribute('data-lyx-perms', '1');
+            box.style.cssText = 'margin-top:14px';
+            const h = document.createElement('h3');
+            h.textContent = '她可以申请的能力';
+            box.appendChild(h);
+            const tip = document.createElement('div');
+            tip.className = 'hint';
+            tip.textContent = '她要越界干活时会主动开口要（在 QQ 里问）。这里同意就一直开着，直到你在这里关掉，或者在 QQ 里说「关命令 / 关写文件」。';
+            box.appendChild(tip);
+            root.appendChild(box);
+          }
+          Array.prototype.slice.call(box.querySelectorAll('[data-cap-row]')).forEach(function (n) { n.remove(); });
+          (list || []).forEach(function (item) {
+            const row = document.createElement('div');
+            row.setAttribute('data-cap-row', item.cap);
+            row.className = 'lyx-roll';
+            row.style.cssText = 'margin-top:10px;align-items:center;flex-wrap:nowrap';
+            const left = document.createElement('div');
+            left.style.cssText = 'flex:1 1 auto;min-width:0';
+            const name = document.createElement('div');
+            name.className = 'lbl';
+            name.textContent = item.label + (item.enabled ? '　已开' : '　已关');
+            const desc = document.createElement('div');
+            desc.className = 'hint';
+            desc.style.cssText = 'white-space:normal';
+            desc.textContent = item.desc || '';
+            left.appendChild(name);
+            left.appendChild(desc);
+            const btn = document.createElement('button');
+            btn.className = 'btn ' + (item.enabled ? 'danger' : 'primary');
+            btn.style.cssText = 'flex:0 0 auto';
+            btn.textContent = item.enabled ? '关闭' : '开启';
+            btn.onclick = function () {
+              btn.disabled = true;
+              fetch('/lanyuxi/perms?' + item.cap + '=' + (item.enabled ? '0' : '1'), { method: 'POST' })
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                  if (!d || !d.ok) throw new Error('接口没给 ok');
+                  lyxToast((item.enabled ? '已关闭：' : '已开启：') + item.label);
+                  renderPerms(d.list || []);
+                })
+                .catch(function (e) { btn.disabled = false; lyxToast('没保存上：' + ((e && e.message) || '接口不可用')); });
+            };
+            row.appendChild(left);
+            row.appendChild(btn);
+            box.appendChild(row);
+          });
+        }
+        function loadPerms() {
+          fetch('/lanyuxi/perms', { cache: 'no-store' })
+            .then(function (r) { return r.json(); })
+            .then(function (d) { if (!dead && d && d.list) renderPerms(d.list); })
+            .catch(function () {});
+        }
         function post(action) {
           return fetch('/lanyuxi/brakes?action=' + action, { method: 'POST' }).then(function (r) { return r.json(); });
         }
@@ -1680,6 +1741,7 @@ window.__ModuleLoader__.load({
           }
         }
         fetch('/lanyuxi/brakes', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(paint).catch(function () {});
+        loadPerms();
         return function () { dead = true; };
       }, [tab]);
 

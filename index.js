@@ -2656,6 +2656,7 @@ export function apply(ctx, rawConfig) {
             return send(403, { ok: false, error: "跨站请求被拒绝（Sec-Fetch-Site: " + site + "）" })
           }
         }
+        // 能力清单：以后新增能力只在这里加一行，面板会自动多出一个开关
         if (url.pathname === "/lanyuxi/perms") {
           if (req.method === "POST") {
             const q = url.searchParams
@@ -2665,7 +2666,16 @@ export function apply(ctx, rawConfig) {
             }
             savePerms()
           }
-          return send(200, { ok: true, perms: { ...perms }, pending: pendingPerm ? pendingPerm.cap : "" })
+          const CAPS = [
+            { cap: "shell", label: "跑命令（run_shell）", desc: "允许她执行 PowerShell 命令；关掉后她只能用插件自带的工具。" },
+            { cap: "homeWrite", label: "写家目录（home_write）", desc: "允许她往 lanyuxi-home 里写文件；关掉后她只能写日记/表情这些固定路径。" },
+          ]
+          return send(200, {
+            ok: true,
+            perms: { ...perms },
+            pending: pendingPerm ? pendingPerm.cap : "",
+            list: CAPS.map((c) => ({ ...c, enabled: Boolean(perms[c.cap]) })),
+          })
         }
         if (url.pathname === "/lanyuxi/status") {
           // 没连上时不能回显"上次连上时的残留值"（selfId / verified / verifyDetail），
