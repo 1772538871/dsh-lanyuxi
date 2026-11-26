@@ -245,7 +245,7 @@ window.__ModuleLoader__.load({
             if (!res.ok) {
               setScan(function (prev) {
                 if (!prev || prev.done) return prev;
-                return { open: true, done: false, qr: null, expiresAt: prev.expiresAt, status: (res.error || '拿不到二维码') + ' · 正在重启 NapCat…' };
+                return { open: true, done: false, qr: null, confirmed: prev.confirmed, expiresAt: prev.expiresAt, status: (res.error || '拿不到二维码') + ' · 正在重启 NapCat…' };
               });
               if (!lastRestart || Date.now() - lastRestart > 8000) {
                 lastRestart = Date.now();
@@ -256,7 +256,8 @@ window.__ModuleLoader__.load({
             const url = URL.createObjectURL(res.blob);
             const old = lastUrl; lastUrl = url;
             setScan(function (prev) {
-              if (prev && prev.done) return prev;
+              if (prev && (prev.done || prev.confirmed)) return prev;   // 已点"手机上确认"后不要再把码显示出来
+              if (prev && prev.confirmed) return prev;   // 已经点过「我已在手机上确认」：别再让二维码冒出来诱导重扫
               const stillValid = prev && prev.expiresAt && prev.expiresAt - Date.now() > 5000;
               return { open: true, done: false, qr: url, expiresAt: stillValid ? prev.expiresAt : Date.now() + 300000, status: '用手机 QQ 扫一下' };
             });
@@ -428,7 +429,11 @@ window.__ModuleLoader__.load({
               title: '点一下重新获取二维码',
               onClick: function () { window.dispatchEvent(new CustomEvent('lyx-scan-refresh')); },
             },
-              qrExpired
+              scan.confirmed && !scan.done
+                ? h('div', { style: { width: 180, height: 180, display: 'grid', placeItems: 'center', gap: 10 } },
+                    h('div', { className: 'lyx-spin' }),
+                    h('div', { style: { fontSize: 12, color: '#8b98a8', textAlign: 'center', lineHeight: 1.6 } }, '已确认，正在等\nNapCat 登录…'))
+                : qrExpired
                 ? h('div', { style: { width: 180, height: 180, display: 'grid', placeItems: 'center', gap: 8, background: 'rgba(11,14,20,.72)', borderRadius: 10 } },
                     h('div', { style: { fontSize: 13, fontWeight: 600, color: '#ffb4ae' } }, '二维码已失效'),
                     h('div', { style: { fontSize: 12, color: '#8b98a8' } }, '点这里重新获取'))
@@ -438,7 +443,9 @@ window.__ModuleLoader__.load({
                       h('div', { className: 'lyx-spin' }),
                       h('div', { style: { color: '#8b98a8', fontSize: 12, textAlign: 'center', lineHeight: 1.5 } }, 'NapCat 还没就绪 · 正在等二维码…'))),
             h('div', { style: { marginTop: 8, color: '#8b98a8', fontSize: 12, textAlign: 'center' } },
-              '二维码过期或没反应？点二维码重新获取')),
+              '二维码过期或没反应？点二维码重新获取'),
+            h('div', { style: { marginTop: 4, color: '#ffb4ae', fontSize: 12, textAlign: 'center', lineHeight: 1.5 } },
+              '⚠ 手机上点「确认」后请等 5~10 秒，不要重复扫码 —— 反复扫会被 QQ 判为登录异常')),
           scan.done ? null : h('div', { className: 'mexp' },
             h('div', { className: 'top' }, h('span', null, '当前二维码有效时间'), h('span', null, remain > 0 ? mmss : '已失效 · 点二维码刷新')),
             h('div', { className: 'bar' }, h('i', { style: { width: pct + '%' } }))),
@@ -449,7 +456,15 @@ window.__ModuleLoader__.load({
             h('button', { className: 'btn primary', onClick: function () { window.openNapcat(); } }, '打开 NapCat 面板'),
             scan.done
               ? h('button', { className: 'btn primary', onClick: function () { window.openNapcat(); } }, '打开 NapCat 面板')
-              : null))) : null;
+              : h('button', {
+                  className: 'btn',
+                  onClick: function () {
+                    setScan(function (prev) {
+                      if (!prev) return prev;
+                      return { open: true, done: false, qr: null, confirmed: true, expiresAt: prev.expiresAt, status: '已确认，正在等 NapCat 登录（通常 5~10 秒），请不要重复扫码' };
+                    });
+                  },
+                }, '我已在手机上确认')))) : null;
 
       React.useEffect(function () {
         const rail = document.querySelector('.lyx-rail');
