@@ -235,7 +235,9 @@ window.__ModuleLoader__.load({
           });
           fetch('/lanyuxi/qr?t=' + Date.now(), { cache: 'no-store' }).then(function (r) {
             const wsDown = r.headers.get('x-ws-up') === '0';
-            if (r.ok) return r.blob().then(function (b) { return { ok: true, blob: b, wsDown }; });
+            const mtime = Number(r.headers.get('x-qr-mtime') || 0);
+            const qrAge = mtime ? Date.now() - mtime : 0;
+            if (r.ok) return r.blob().then(function (b) { return { ok: true, blob: b, wsDown, qrAge }; });
             return r.json().catch(function () { return {}; }).then(function (j) { return { ok: false, error: (j && j.error) || '', wsDown }; });
           }).then(function (res) {
             if (!res || stopped) return;
@@ -258,6 +260,11 @@ window.__ModuleLoader__.load({
             setScan(function (prev) {
               if (prev && (prev.done || prev.confirmed)) return prev;   // 已点"手机上确认"后不要再把码显示出来
               if (prev && prev.confirmed) return prev;   // 已经点过「我已在手机上确认」：别再让二维码冒出来诱导重扫
+              // 二维码文件 70 秒没再刷新 → 多半已经被扫过（NapCat 大约每分钟换一次码），
+              // 这时自动进入"等待登录"态，避免用户对着过期码反复扫。
+              if (prev && res.qrAge > 70000) {
+                return { open: true, done: false, qr: null, confirmed: true, expiresAt: prev.expiresAt, status: '二维码已 70 秒没刷新，多半已经扫过了 —— 正在等 NapCat 登录，请不要重复扫码' };
+              }
               const stillValid = prev && prev.expiresAt && prev.expiresAt - Date.now() > 5000;
               return { open: true, done: false, qr: url, expiresAt: stillValid ? prev.expiresAt : Date.now() + 300000, status: '用手机 QQ 扫一下' };
             });
