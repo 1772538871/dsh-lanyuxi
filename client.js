@@ -259,7 +259,7 @@ window.__ModuleLoader__.load({
             const old = lastUrl; lastUrl = url;
             setScan(function (prev) {
               if (prev && (prev.done || prev.confirmed)) return prev;   // 已点"手机上确认"后不要再把码显示出来
-              if (prev && prev.confirmed) return prev;   // 已经点过「我已在手机上确认」：别再让二维码冒出来诱导重扫
+              if (prev && prev.confirmed) return prev;   // 已判定"扫过了"：别再让二维码冒出来诱导重扫
               // 二维码文件 70 秒没再刷新 → 多半已经被扫过（NapCat 大约每分钟换一次码），
               // 这时自动进入"等待登录"态，避免用户对着过期码反复扫。
               if (prev && res.qrAge > 70000) {
@@ -463,15 +463,7 @@ window.__ModuleLoader__.load({
             h('button', { className: 'btn primary', onClick: function () { window.openNapcat(); } }, '打开 NapCat 面板'),
             scan.done
               ? h('button', { className: 'btn primary', onClick: function () { window.openNapcat(); } }, '打开 NapCat 面板')
-              : h('button', {
-                  className: 'btn',
-                  onClick: function () {
-                    setScan(function (prev) {
-                      if (!prev) return prev;
-                      return { open: true, done: false, qr: null, confirmed: true, expiresAt: prev.expiresAt, status: '已确认，正在等 NapCat 登录（通常 5~10 秒），请不要重复扫码' };
-                    });
-                  },
-                }, '我已在手机上确认')))) : null;
+              : null))) : null;
 
       React.useEffect(function () {
         const rail = document.querySelector('.lyx-rail');
@@ -908,18 +900,29 @@ window.__ModuleLoader__.load({
           });
           paintOne('st-wx', { ok: false, offText: '未绑定' });
         }
-        Promise.all([
-          fetch('/lanyuxi/overview', { cache: 'no-store' }).then(function (r) { return r.json(); }).catch(function () { return null; }),
-          fetch('/lanyuxi/bili', { cache: 'no-store' }).then(function (r) { return r.json(); }).catch(function () { return null; }),
-        ]).then(function (res) {
+        function run() {
+          Promise.all([
+            fetch('/lanyuxi/overview', { cache: 'no-store' }).then(function (r) { return r.json(); }).catch(function () { return null; }),
+            fetch('/lanyuxi/bili', { cache: 'no-store' }).then(function (r) { return r.json(); }).catch(function () { return null; }),
+          ]).then(function (res) {
           if (dead) return;
           paintCards(res[0], res[1]);
           try {
             const n = Array.prototype.slice.call(scope.querySelectorAll('.card')).filter(function (c) { return Boolean(kindOf(c)); }).length;
             console.info('[lanyuxi] 平台卡片刷新：' + n + ' 张（QQ/B站/微信都按真实登录态显示）');
           } catch (e) {}
-        });
-        return function () { dead = true; };
+          });
+        }
+        run();
+        // 登录成功那一刻就要变「已登录」，不能等用户关面板再开：
+        // 弹窗关闭/扫码成功都会派发 lyx-refresh，这里跟着重画；另外每 5 秒兜一次底。
+        window.addEventListener('lyx-refresh', run);
+        const poll = setInterval(run, 5000);
+        return function () {
+          dead = true;
+          clearInterval(poll);
+          window.removeEventListener('lyx-refresh', run);
+        };
       }, [tab]);
 
       // —— 全局：其它页面里的扫码按钮（原型把它们复制到了总览/人格/权限页）——
